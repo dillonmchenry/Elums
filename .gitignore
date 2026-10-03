@@ -17,6 +17,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.venv-tools/
+.scratch-*/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

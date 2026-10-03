@@ -1,0 +1,27 @@
+# Model identifiers resolved against live sources rather than guessed.
+# Each entry records where the identifier was verified — see docs/licensing-audit.md
+# for the license finding and docs/vm-baseline.md for hardware/version context.
+# Consumed by elums/config.py once that module exists (M4); kept here now so
+# M1's download scripts and M8's separation job share one source of truth.
+
+separation:
+  vocals_mel_band_roformer:
+    filename: vocals_mel_band_roformer.ckpt
+    source: "audio-separator --list_models (v0.47.0)"
+    author: "Kimberley Jensen"
+    license: MIT  # relicensed from GPL-3.0, April 2026 — see docs/licensing-audit.md
+    sdr_vocals: 12.6
+    resolved_on: 2026-10-03
+    # Downloaded Oct 3 2026 via audio-separator's own downloader, not
+    # huggingface_hub. See scripts/download_weights.ps1.
+    downloaded: true
+    size_bytes: 913106900
+    sha256: "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e"
+    cli_gotcha: >
+      The model selector is -m/--model_filename, NOT a positional argument.
+      `audio-separator vocals_mel_band_roformer.ckpt --download_model_only`
+      silently downloads the DEFAULT model (model_bs_roformer_ep_317_sdr_12.9755.ckpt)
+      instead and exits 0 — no error, no warning. Must be
+      `audio-separator -m vocals_mel_band_roformer.ckpt --download_model_only`.
+      Verified by direct trial on Oct 3 2026; recorded here so the mistake
+      is not repeated in scripts/download_weights.ps1 or in M8's job code.
