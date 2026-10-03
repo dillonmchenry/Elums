@@ -1,0 +1,41 @@
+# Machine-specific / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_*
+*_rsa
+*_ed25519
+
+# Data and models — VM-only / regenerable, never committed
+data/
+models/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+.vite/
+
+# Build artifacts
+dist/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
