@@ -40,12 +40,38 @@ Step "Mel-Band RoFormer vocals (Kimberley Jensen)" "vocals_mel_band_roformer.ckp
 }
 
 # --- Item 2: all-in-one-infer checkpoints (first needed Sun Oct 4) ---
-# DEFERRED: mechanism confirmed (huggingface_hub.hf_hub_download from
-# huggingface.co/taejunkim/allinone, ungated, verified Oct 3 2026), but the
-# package has 8 CV folds (harmonix-fold0..7) plus "all-*" and "raveform-*"
-# variants and no single canonical default was confirmed today. Resolve the
-# fold the package actually loads by default when `allin1` is installed on
-# Sun Oct 4, then download just that fold here rather than all 17 files.
+# Resolved Oct 4 2026 (N1, EC-3): the package's default model is the
+# `harmonix-all` ENSEMBLE, not a single fold — it loads and averages all 8
+# `harmonix-fold0..7` checkpoints (~1.4 MB each, ~11 MB total). Confirmed by
+# running `allin1_infer.analyze()` once and reading the actual cache
+# contents rather than guessing; see config/models.yaml's
+# `structure_beats.harmonix_all` entry for the full file list.
+#
+# Downloads into the SAME HF_HOME elums/ingest/structure.py points at
+# (${MODEL_ROOT}/hf-cache) — not a separate flat layout — so this
+# pre-warms exactly the cache the real job reads, rather than staging
+# files the library's own resolver would never look at. allow_patterns
+# skips the repo's unused "all-*" and "raveform-*" fold variants.
+Step "all-in-one-infer harmonix-all (8-fold ensemble)" "hf-cache\hub\models--taejunkim--allinone\refs\main" {
+    & $venvPython -c "
+import os
+os.environ['HF_HOME'] = r'$modelDir\hf-cache'
+from huggingface_hub import snapshot_download
+snapshot_download(
+    'taejunkim/allinone',
+    allow_patterns=['harmonix-fold*.pth'],
+)
+"
+}
+# Separately, the package runs its OWN HTDemucs separation on the original
+# mix (per IMPLEMENTATION_PLAN_2026-10-04.md §3 — it needs 4 demucs stems,
+# which Saturday's 2-stem Mel-Band RoFormer output cannot supply). That
+# checkpoint (955717e8-8726e21a.th, 80.2 MB) comes from torch.hub, not
+# huggingface_hub, and elums/ingest/structure.py pins its cache directory
+# via `torch.hub.set_dir()` to ${MODEL_ROOT}/torch-cache at import time —
+# verified Oct 4 2026 that a bare TORCH_HOME env var is NOT honored by this
+# download path in this package version, so it is set in code instead.
+# Nothing to do here; the first real structure job downloads it once.
 
 # --- Item 3: Whisper large-v3-turbo (first needed Mon Oct 5) ---
 Step "Whisper large-v3-turbo" "whisper-large-v3-turbo\config.json" {

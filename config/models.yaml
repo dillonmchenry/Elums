@@ -25,3 +25,35 @@ separation:
       `audio-separator -m vocals_mel_band_roformer.ckpt --download_model_only`.
       Verified by direct trial on Oct 3 2026; recorded here so the mistake
       is not repeated in scripts/download_weights.ps1 or in M8's job code.
+
+structure_beats:
+  # Sun Oct 4 (N1). EC-3 from IMPLEMENTATION_PLAN_2026-10-04.md: resolved by
+  # actually running `allin1_infer.analyze()` once rather than guessing.
+  harmonix_all:
+    package: "all-in-one-infer==3.1.0"
+    model_name: "harmonix-all"  # the package's own default; an 8-fold ensemble, not one file
+    source: "huggingface.co/taejunkim/allinone (ungated), via huggingface_hub"
+    license: NOASSERTION  # repo metadata; package's own LICENSE file asserts MIT (see docs/licensing-audit.md)
+    files:
+      - harmonix-fold0-0vra4ys2.pth
+      - harmonix-fold1-3ozjhtsj.pth
+      - harmonix-fold2-gmgo0nsy.pth
+      - harmonix-fold3-i92b7m8p.pth
+      - harmonix-fold4-1bql5qo0.pth
+      - harmonix-fold5-x4z5zeef.pth
+      - harmonix-fold6-x7t226rq.pth
+      - harmonix-fold7-qwwskhg6.pth
+    total_size_bytes: 11534336  # ~1.4 MB each, verified Oct 4 2026 — consistent with the ~300K-param model
+    resolved_on: 2026-10-04
+    note: >
+      The package also pulls its own HTDemucs checkpoint for source
+      separation (955717e8-8726e21a.th, 80.2 MB, from
+      dl.fbaipublicfiles.com/demucs/hybrid_transformer/ via torch.hub) —
+      this is NOT the vocals_mel_band_roformer checkpoint above; it is a
+      second, independent separation the structure model runs on the
+      original mix to get its required 4 stems (bass/drums/other/vocals),
+      per the Oct 4 plan §3's "own HTDemucs" decision. Verified Oct 4 2026
+      that torch.hub does not honor a bare TORCH_HOME env var for this
+      download in this package version — elums/ingest/structure.py sets
+      `torch.hub.set_dir()` explicitly at import time instead, so the
+      checkpoint survives container restarts under ${MODEL_ROOT}.

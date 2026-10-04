@@ -64,6 +64,15 @@ gpu = [
     # transitively, but a module we wrote importing it directly needs its
     # own explicit pin, not a free ride on someone else's dependency.
     "soundfile==0.14.0",
+    # Sun Oct 4 (N1, EC-1): structure/beats/downbeats/sections. Pulls in
+    # demucs-infer -> torchaudio>=2.0.0, but the cu130 index tops out at
+    # torchaudio 2.11.0 while torch is pinned to 2.14.1 (one-wheel
+    # discipline, §3.2 of the Oct 3 plan). Pin torchaudio explicitly to the
+    # newest cu130-available build rather than letting it float — verified
+    # importable together Oct 4 2026, see PROGRESS.md Day 2 EC-1.
+    "all-in-one-infer==3.1.0",
+    "torchaudio==2.11.0",
+    "librosa==1.0.0",
 ]
 
 # "dev" is host-side only — pytest hits the real running compose stack
@@ -91,8 +100,14 @@ dev = [
 # Oct 3 2026 (M7), the first unit test (not hitting the live stack over
 # HTTP) in the suite.
 pythonpath = ["."]
+# N4 (Oct 4): without this, pytest's default collection walks the whole
+# repo, including ./models/hf-cache — populated by N1's torch.hub/HF
+# downloads — whose cache layout trips Windows ("WinError 1920") when
+# pytest's directory walk stats entries it has no business visiting.
+# Scoping to tests/ is also just correct regardless of that bug.
+testpaths = ["tests"]
 markers = [
-    "gpu: requires a running gpu-worker with the separation checkpoint on disk (tests/test_separation.py)",
+    "gpu: requires a running gpu-worker with the separation checkpoint on disk (tests/test_separation.py, tests/test_structure.py)",
 ]
 
 [[tool.uv.index]]
