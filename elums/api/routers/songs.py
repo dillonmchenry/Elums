@@ -19,12 +19,22 @@ from elums.blobs.service import record_blob
 from elums.blobs.store import BlobStore
 from elums.config import settings
 from elums.ingest.probe import UndecodableAudioError, probe_audio
+from elums.jobs.app import app as procrastinate_app
 from elums.models.ingest_job import IngestJob
 from elums.models.song import Song, SongVisibility
 from elums.models.user import User
 from elums.schemas.songs import SongPublic
 
 router = APIRouter(prefix="/songs", tags=["songs"])
+
+# M8: deferred by task NAME, not by importing `elums.separation.task`
+# directly — that module imports torch, which the `api` image
+# deliberately does not have (§11.6: keep api/worker torch-free). `queue`
+# and `lock` are passed explicitly here because this process never
+# imports the `@app.task(...)`-decorated function itself, so there's no
+# decorator for Procrastinate to read them off of — see
+# elums/jobs/gpu_app.py and elums/separation/task.py's module docstrings.
+_SEPARATION_TASK_NAME = "elums.separation.task.separate"
 
 
 class _SizeCappedReader:
@@ -118,4 +128,21 @@ async def upload_song(
         )
 
     await db.commit()
+
+    # Not a single atomic transaction with the `songs`/`ingest_jobs` commit
+    # above — Procrastinate's own connector and this request's SQLAlchemy
+    # session are two separate Postgres connections, and sharing one
+    # transaction across both would need lower-level plumbing than this
+    # milestone's time budget allows. Deferred immediately after a
+    # successful commit instead: the only gap this leaves is a crash in
+    # the few milliseconds between the two calls, which strands a
+    # `pending` ingest_job with no job behind it — recoverable later by a
+    # sweep that re-defers any `pending` job older than a few minutes
+    # (not built today; noted as a known gap, not a silent one). The
+    # connector itself is opened once, for the app's whole lifetime, in
+    # elums/api/main.py's lifespan — not re-opened per request here.
+    await procrastinate_app.configure_task(
+        name=_SEPARATION_TASK_NAME, queue="gpu", lock="gpu:separation"
+    ).defer_async(song_id=str(song.id))
+
     return song

@@ -139,3 +139,11 @@ class IngestJob(TimestampMixin, Base):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # M8: so the SPA's progress poll shows movement within a stage, not
+    # just across the 7 stage columns above. `step_total` is 1 today
+    # (separation is one indivisible step); later stages that have their
+    # own internal sub-steps raise it.
+    step_index: Mapped[int] = mapped_column(nullable=False, default=0)
+    step_total: Mapped[int] = mapped_column(nullable=False, default=1)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)

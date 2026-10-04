@@ -29,6 +29,7 @@ from elums.api.deps import get_db
 from elums.auth.sessions import get_session_by_token
 from elums.config import settings
 from elums.models.song import Song, SongVisibility
+from elums.models.stem import Stem
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -44,8 +45,15 @@ async def blob_authz(request: Request, db: AsyncSession = Depends(get_db)) -> Re
         return Response(status_code=403)
     sha256 = match.group("sha256")
 
-    result = await db.execute(select(Song).where(Song.source_blob_sha256 == sha256))
-    songs = list(result.scalars().all())
+    # A blob is "reachable" either as a song's own source upload, or (M8)
+    # as one of that song's separated stems — both grant the same access
+    # as the owning song, since a stem is derived from and inherits the
+    # visibility of its song, not a separate permission of its own.
+    direct = await db.execute(select(Song).where(Song.source_blob_sha256 == sha256))
+    via_stem = await db.execute(
+        select(Song).join(Stem, Stem.song_id == Song.id).where(Stem.blob_sha256 == sha256)
+    )
+    songs = list({song.id: song for song in (*direct.scalars(), *via_stem.scalars())}.values())
     if not songs:
         return Response(status_code=403)
 

@@ -4,6 +4,7 @@ from elums.models.follow import Follow
 from elums.models.ingest_job import IngestJob, IngestJobStage, IngestJobStatus
 from elums.models.session import Session
 from elums.models.song import Song, SongVisibility
+from elums.models.stem import Stem, StemKind
 from elums.models.user import User
 
 __all__ = [
@@ -16,5 +17,7 @@ __all__ = [
     "Session",
     "Song",
     "SongVisibility",
+    "Stem",
+    "StemKind",
     "User",
 ]

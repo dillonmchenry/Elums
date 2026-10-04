@@ -59,6 +59,11 @@ gpu = [
     # (see docs/licensing-audit.md / config/models.yaml EC-5 notes). Must be
     # pinned explicitly or the gpu image crashes on import.
     "audioread>=3.1.0",
+    # elums/separation/task.py imports this directly (to read sample_rate/
+    # duration off the output stems) — audio-separator already pulls it in
+    # transitively, but a module we wrote importing it directly needs its
+    # own explicit pin, not a free ride on someone else's dependency.
+    "soundfile==0.14.0",
 ]
 
 # "dev" is host-side only — pytest hits the real running compose stack
@@ -86,6 +91,9 @@ dev = [
 # Oct 3 2026 (M7), the first unit test (not hitting the live stack over
 # HTTP) in the suite.
 pythonpath = ["."]
+markers = [
+    "gpu: requires a running gpu-worker with the separation checkpoint on disk (tests/test_separation.py)",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

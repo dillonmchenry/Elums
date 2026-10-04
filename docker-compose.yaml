@@ -70,7 +70,15 @@ services:
     # sys.path, so it can't import the `elums` package and fails with a
     # generic "Could not load app" — no traceback, hit and fixed directly
     # Oct 3 2026 (M4). `python -m` adds cwd to sys.path[0].
-    command: ["python", "-m", "procrastinate", "--app=elums.jobs.app.app", "worker"]
+    # `-q default`, not "all queues" (procrastinate's default with no `-q`
+    # flag): without this, `worker` raced `gpu-worker` for every
+    # `queue="gpu"` job and lost the race by failing instantly — it never
+    # imports elums.separation.task (no torch in this image), so the task
+    # name is unknown to it. Hit directly Oct 3 2026 (M8): the separation
+    # job's status went straight to `failed` with no gpu-worker log line
+    # at all. "default" has no tasks yet, but keeps this worker ready for
+    # non-GPU tasks later without it ever touching the `gpu` queue.
+    command: ["python", "-m", "procrastinate", "--app=elums.jobs.app.app", "worker", "-q", "default"]
     depends_on:
       db:
         condition: service_healthy
@@ -90,7 +98,11 @@ services:
     environment:
       - EXPECTED_SM_ARCH=${EXPECTED_SM_ARCH:-sm_86}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    command: ["python", "-m", "procrastinate", "--app=elums.jobs.app.app", "worker", "-q", "gpu"]
+    # M8: `elums.jobs.gpu_app`, not `elums.jobs.app` — importing that
+    # module is what registers the `separate` task (it pulls in
+    # elums.separation.task, which needs torch). See that module's
+    # docstring.
+    command: ["python", "-m", "procrastinate", "--app=elums.jobs.gpu_app.app", "worker", "-q", "gpu"]
     depends_on:
       db:
         condition: service_healthy
