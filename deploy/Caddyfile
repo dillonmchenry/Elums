@@ -17,6 +17,30 @@
 		reverse_proxy api:8000
 	}
 
+	# M7: the byte path. Caddy asks FastAPI "may this request read this
+	# blob?" (204 allow, anything else deny — the deny response is copied
+	# straight back to the client, so a 403 from the authz endpoint IS the
+	# client-visible 403). Once allowed, Caddy serves the file itself —
+	# `file_server` gets correct HTTP Range handling for free, which is
+	# the entire point of keeping Python out of this path. `api` publishes
+	# no host port and `/internal/*` is never proxied here, so the authz
+	# endpoint itself is unreachable from outside this container network.
+	handle /blobs/* {
+		forward_auth api:8000 {
+			uri /internal/blob-authz
+		}
+		header Cache-Control "public, max-age=31536000, immutable"
+		# `/srv/elums-data`, not `/data`: Caddy's own image reserves /data
+		# for its TLS/certificate storage, so the host's ./data is mounted
+		# at /srv/elums-data instead (docker-compose.yaml). `handle`
+		# (unlike `handle_path`) does not strip the `/blobs` prefix from
+		# the request URI, so the request's own `/blobs/<ab>/<cd>/<sha>`
+		# path completes to `${BLOB_ROOT}` (= /data/blobs on api/gpu-worker,
+		# the same host directory) without any rewrite needed here.
+		root * /srv/elums-data
+		file_server
+	}
+
 	# Vite's dev server + its HMR websocket upgrade — both proxied through
 	# the same :8080 origin so COOP/COEP (set above) actually covers the
 	# app, and so there is exactly one port to tunnel.

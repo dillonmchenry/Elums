@@ -11,13 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from elums.api.errors import ApiError
 from elums.auth.sessions import get_session_by_token
+from elums.blobs.store import BlobStore, LocalBlobStore
 from elums.config import settings
 from elums.db import get_db  # re-exported for router convenience
 from elums.models.user import User
 
-__all__ = ["get_current_user", "get_db", "get_valkey"]
+__all__ = ["get_blob_store", "get_current_user", "get_db", "get_valkey"]
 
 _valkey_pool: valkey_asyncio.Valkey | None = None
+_blob_store: BlobStore | None = None
+
+
+def get_blob_store() -> BlobStore:
+    global _blob_store
+    if _blob_store is None:
+        _blob_store = LocalBlobStore(settings.blob_root)
+    return _blob_store
 
 
 def _valkey_client() -> valkey_asyncio.Valkey:

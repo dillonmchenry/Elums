@@ -13,6 +13,16 @@
 
 FROM python:3.13-slim AS base
 
+# ffmpeg (ffprobe specifically) is needed by BOTH targets now: the gpu
+# image needs it just to list/download audio-separator models (see below),
+# and the app image needs `ffprobe` to sniff uploads in M7's `POST
+# /api/songs` (sniff real audio streams rather than trusting the client's
+# content-type/extension). Moved up to `base` directly Oct 3 2026 (M7) so
+# it isn't duplicated per-target.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /usr/local/bin/
 
 ENV UV_LINK_MODE=copy \
@@ -36,18 +46,14 @@ CMD ["uvicorn", "elums.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 # --- gpu target --------------------------------------------------------
 FROM base AS gpu
 
-# ffmpeg is required even just to list/download audio-separator models —
-# verified directly Oct 3 2026 (M1): without it, audio-separator crashes at
-# import/init time with "FFmpeg is not installed", before any separation
-# call is made.
-#
 # build-essential (gcc) is required because audio-separator transitively
 # depends on `diffq` (a Demucs dependency), which has a C extension
 # (bitpack.c) with no prebuilt cp313 wheel — verified directly Oct 3 2026
 # (M3): without a compiler, `uv sync --group gpu` fails with
-# "error: [Errno 2] No such file or directory: 'gcc'".
+# "error: [Errno 2] No such file or directory: 'gcc'". (ffmpeg itself now
+# lives in `base`, above — both targets need it.)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg build-essential \
+    && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Skip flash-attn / xformers entirely (§11.6): sequences are short,

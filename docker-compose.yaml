@@ -54,6 +54,9 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+      # M7: `POST /api/songs` writes blobs to `${BLOB_ROOT}` (= /data/blobs)
+      # — same host directory the gpu-worker and Caddy already mount.
+      - ./data:/data
 
   worker:
     build:
@@ -113,6 +116,14 @@ services:
       - "127.0.0.1:8080:8080" # the ssh -L 8080 tunnel target, see ELUMS_TECHNICAL_APPROACH.md §11.6
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # M7: Caddy serves blob bytes directly off disk (the whole point of
+      # the forward_auth + file_server byte path) — read-only, since
+      # Caddy never writes a blob, only `api`/`gpu-worker` do. Mounted at
+      # /srv/elums-data, not /data: Caddy's own image uses /data
+      # internally for TLS/certificate storage, and mounting our volume
+      # there collided with it — hit directly Oct 3 2026 (M7):
+      # "mkdir /data/caddy: read-only file system".
+      - ./data:/srv/elums-data:ro
     depends_on:
       - api
       - frontend

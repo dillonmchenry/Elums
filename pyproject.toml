@@ -36,6 +36,11 @@ app = [
     "argon2-cffi==25.1.0",
     "valkey==6.1.1",
     "email-validator==2.3.0", # pydantic's EmailStr needs this installed explicitly
+    # Starlette's UploadFile/Form parsing needs this installed explicitly
+    # too (not vendored) — verified directly Oct 3 2026 (M7):
+    # ModuleNotFoundError: No module named 'multipart' the moment
+    # POST /api/songs received a multipart/form-data request.
+    "python-multipart==0.0.32",
 ]
 
 # "gpu" is the audio/ML stack. Torch is pinned to the cu130 index for both
@@ -70,6 +75,17 @@ dev = [
     # docker-compose.yaml. Never installed into any image.
     "psycopg[binary]==3.3.6",
 ]
+
+[tool.pytest.ini_options]
+# `elums` is never actually `pip install`ed anywhere (not even in the
+# Docker images — it works there by accident of uvicorn's `app_dir`
+# adding cwd to sys.path). Pytest's default "rootless" import mode adds
+# only the test file's own directory to sys.path, not the repo root, so
+# tests/test_blobstore.py's `from elums.blobs.store import ...` failed
+# with "No module named 'elums'" until this was added — hit directly
+# Oct 3 2026 (M7), the first unit test (not hitting the live stack over
+# HTTP) in the suite.
+pythonpath = ["."]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

@@ -64,6 +64,13 @@ class IngestJob(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = uuidv7_pk()
 
+    # M7: every ingest job now exists because `POST /api/songs` created a
+    # Song row in the same transaction — M8's `separate(song_id)` task
+    # takes this, not the ingest job's own id.
+    song_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("songs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
     # The uploaded source file, content-addressed in the BlobStore (M7).
     # Nullable until M7 exists; M4 only needs the column to be present.
     source_blob_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
