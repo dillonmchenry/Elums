@@ -1,6 +1,6 @@
-# M4: the full 6-service stack. `make up` should bring this up green on
-# either machine with no change but .env — see IMPLEMENTATION_PLAN_2026-10-03.md M4
-# and ELUMS_TECHNICAL_APPROACH.md §4/§11.6.
+# M4/M5: the full stack. `make up` should bring this up green on either
+# machine with no change but .env — see IMPLEMENTATION_PLAN_2026-10-03.md
+# M4/M5 and ELUMS_TECHNICAL_APPROACH.md §4/§11.6.
 #
 # Image tags verified against Docker Hub directly Oct 3 2026 (not guessed):
 #   pgvector/pgvector:pg18   — Postgres 18 + pgvector, confirmed present
@@ -98,6 +98,15 @@ services:
       - ./models:/app/models
       - ./data:/data
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: elums:frontend-dev
+    volumes:
+      - ./frontend:/app
+      - elums-frontend-node-modules:/app/node_modules # bind-mounting ./frontend would otherwise shadow it
+
   caddy:
     image: caddy:2.11-alpine
     ports:
@@ -106,6 +115,8 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
       - api
+      - frontend
 
 volumes:
   elums-db-data:
+  elums-frontend-node-modules:

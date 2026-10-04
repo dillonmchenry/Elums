@@ -1,4 +1,4 @@
-.PHONY: up down build migrate seed logs ps verify-gpu test
+.PHONY: up down build migrate seed logs ps verify-gpu test openapi
 
 # M4 EC-8: `make` was missing locally (Windows) — installed via
 # `winget install ezwinports.make`. No Windows-only logic lives here;
@@ -39,6 +39,13 @@ verify-gpu:
 test:
 	uv sync --group dev
 	uv run pytest -q
+
+# Regenerate the committed openapi.json from the running api service.
+# Note: on Windows, run this from `make` (not a bare PowerShell `>`
+# redirect) — PowerShell's `>` writes UTF-16LE with a BOM by default and
+# silently corrupts the file; this was hit directly Oct 3 2026 (M5).
+openapi:
+	docker compose exec api python -c "import json; from elums.api.main import app; print(json.dumps(app.openapi(), indent=2, sort_keys=True))" > openapi.json
 
 .env:
 	cp .env.example .env

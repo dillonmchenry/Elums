@@ -1,14 +1,26 @@
-# M4: proxy only — no SPA yet (M5). The `ssh -L 8080` tunnel pattern makes
-# this an asset: browsers treat localhost as a secure context regardless of
+# M5: full dev routing. The ssh -L 8080 tunnel pattern is an asset, not a
+# problem — browsers treat localhost as a secure context regardless of
 # scheme, so getUserMedia/Service Workers/AudioWorklet all work over plain
-# HTTP through the tunnel (ELUMS_TECHNICAL_APPROACH.md §11.6). No TLS block
-# here on purpose.
+# HTTP through the tunnel (ELUMS_TECHNICAL_APPROACH.md §11.6). No TLS
+# block here on purpose.
 :8080 {
+	# Cross-origin isolation, required for SharedArrayBuffer (the
+	# AudioWorklet <-> pitch-worker ring buffer, §7/§11.5) — multi-threaded
+	# WASM silently collapses to one thread without it. Self-hosted assets
+	# only (no CDN) is what keeps COEP from breaking, per §11.5's warning.
+	header {
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
+	}
+
 	handle /api/* {
 		reverse_proxy api:8000
 	}
 
+	# Vite's dev server + its HMR websocket upgrade — both proxied through
+	# the same :8080 origin so COOP/COEP (set above) actually covers the
+	# app, and so there is exactly one port to tunnel.
 	handle {
-		respond "Elums — frontend scaffolded in M5" 200
+		reverse_proxy frontend:5173
 	}
 }

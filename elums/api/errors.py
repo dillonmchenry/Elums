@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Stable snake_case codes for the handful of HTTPExceptions FastAPI/Starlette
 # raise themselves (unmatched route, wrong method) — anything we raise
@@ -55,8 +56,20 @@ def install_error_handlers(app: FastAPI) -> None:
             content=_error_body(exc.code, exc.message, exc.details),
         )
 
-    @app.exception_handler(HTTPException)
-    async def _handle_http_exception(_: Request, exc: HTTPException) -> JSONResponse:
+    # Registered against Starlette's base HTTPException, not fastapi's
+    # subclass: `fastapi.HTTPException` IS A subclass of
+    # `starlette.exceptions.HTTPException`, but Starlette's own router
+    # raises the BASE class directly for unmatched routes (404) and wrong
+    # methods (405) — before FastAPI-level code ever runs. A handler
+    # registered for the fastapi subclass alone never catches those,
+    # since exception-handler dispatch walks the MRO *up* from the raised
+    # instance, not down to subclasses. Verified directly Oct 3 2026 (M5)
+    # by writing a test for it: the subclass-only registration silently
+    # let framework 404s fall through to Starlette's default
+    # {"detail": "..."} shape, breaking the "one error shape" convention
+    # for exactly the routes a client is most likely to hit by mistake.
+    @app.exception_handler(StarletteHTTPException)
+    async def _handle_http_exception(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _STATUS_CODE_NAMES.get(exc.status_code, "http_error")
         message = exc.detail if isinstance(exc.detail, str) else "Request failed."
         return JSONResponse(
