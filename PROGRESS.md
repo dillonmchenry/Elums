@@ -148,3 +148,68 @@ From the plan's §9.7 template, plus findings from tonight's validation pass:
 - **The dev Postgres database has accumulated test-user residue** from repeated pytest runs against the live stack (`"Pytest User"`, `"Song Test User"`, `"Separation Test User"`, etc. — dozens of throwaway rows, visible in a plain `SELECT display_name, count(*) FROM users GROUP BY ...`-style query). Harmless to correctness (each test registers its own unique user) but worth either a teardown fixture or a periodic manual sweep before this matters for a demo.
 - **No HTTP endpoint exists yet for polling an `ingest_job`'s status.** `tests/test_separation.py` polls the `ingest_jobs`/`stems` tables directly via a raw DB connection as a stand-in. The SPA will need a real `GET` route for this before it can show live upload progress — not yet scoped to a specific milestone.
 - **`make` is not resolvable in a fresh shell session on this machine**, despite the Makefile's own comment stating it was installed via `winget install ezwinports.make` earlier today — a PATH-scoping issue (new terminals apparently don't inherit the PATH update without a fresh login/reboot). Worked around tonight by running the Makefile's underlying `docker compose` commands directly. Not blocking, but open a fresh terminal (or reboot) before assuming `make up` works verbatim tomorrow.
+
+---
+
+## Sunday Oct 4 — Day 2 (structure/beats/key/VAD ingest chain)
+
+Governed by [IMPLEMENTATION_PLAN_2026-10-04.md](IMPLEMENTATION_PLAN_2026-10-04.md).
+
+### 1. Milestone status
+
+| Milestone | Status | Notes |
+| --- | --- | --- |
+| N1 — structure/beats/downbeats (`harmonix-all`) | **done** | `elums/ingest/structure.py` |
+| N2 — key (Krumhansl-Schmuckler) + RMS-VAD | **done** | `elums/ingest/key.py`, `elums/ingest/vad.py` |
+| N3 — `song_analyses` table | **done** | `elums/models/song_analysis.py`, migration `5a7a503e7300` |
+| N4 — job chain + ingest-status endpoint + polling UI | **done** | `elums/ingest/tasks.py`, `GET /api/songs/{id}/ingest`, `HomePage.tsx` |
+| N5 — real-song end-to-end validation | **done** | see §4 below |
+
+### 2. Early checks (EC-1 through EC-6)
+
+| # | Risk | Resolution |
+| --- | --- | --- |
+| EC-1 | `torchaudio`/`torch` ABI compatibility | `torchaudio==2.11.0` alongside `torch==2.14.1+cu130` — clean co-import, confirmed with a forced real CUDA kernel launch (`sm_120` present in arch list). No fallback image needed. |
+| EC-2 | Python 3.13 / NATTEN resolution | `uv lock` resolved 148 packages cleanly; NATTEN never pulled in as a transitive extra. |
+| EC-3 | `harmonix-all` checkpoint identity (undocumented going in) | Empirically determined by running `analyze()` once and inspecting the cache: **8 harmonix-fold files, ~11.5 MB total**, from `taejunkim/allinone` on HF. Documented in `config/models.yaml`. |
+| EC-4 | `librosa` 1.0 API | Used as-is (`chroma_cqt`, `feature.rms`) — no API mismatch hit. |
+| EC-5 | MP3 decode path (all-in-one-infer's own torchaudio-based decoder needs `torchcodec`, not installed) | Sidestepped: `_ensure_wav()` in `structure.py` converts non-WAV/FLAC input via ffmpeg before handing it to `analyze()`. |
+| EC-6 | GTSinger VM download status | Not re-checked tonight — carried forward, see §6. |
+
+### 3. Settled architecture note
+
+Per the Oct 4 plan's §3: `run_structure()` runs all-in-one-infer's **own** HTDemucs separation on the original upload, not Saturday's 2-stem Mel-Band RoFormer output — the model's embeddings are shaped for 4 stems (bass/drums/other/vocals), and substituting `other`=instrumental with silent bass/drums would run it off-distribution for exactly the beat/downbeat/section outputs this stage produces. Costs an extra ~30s of GPU time (see §4); shares the `gpu:separation` lock so it never races Saturday's separation job.
+
+### 4. Measured timings (real songs, not synthetic — a first for this project)
+
+Two real CC-BY-licensed tracks with vocals were sourced from archive.org for today's validation (`data/samples/README.md` has full attribution): "Fill Me Up" by Ellody (268.3s) and "Is This All" by Liz James (221.3s). The first upload hit a stale-image issue (see §5 item 2) before useful timing came out of it; the second ran the full chain cleanly:
+
+| Stage | `duration_ms` | `vram_peak_mb` |
+| --- | --- | --- |
+| separation (221.3s song) | 27,713 | 1,741 |
+| structure_beats (same song) | 31,053 | 1,036 |
+| rms_vad (same song) | CPU-only, not separately timed | — |
+
+Total GPU-bound time for this song: **~58.8s** (separation + structure_beats), plus a fast CPU-only VAD pass. This **corrects Day 1's §4 extrapolation** ("≈55–70s on the local 3070" — that was for separation alone, extrapolated from 3s/20s synthetic clips): separation alone on a real 3.7-minute song took 27.7s, well inside that range, and today's new structure_beats stage adds roughly another 31s on top. Real output: `bpm=103`, `key=G minor` (confidence 0.074 — a near-tie per KS's own known relative-major/minor confusion, consistent with §5's documented weakness), 375 beats, 94 downbeats, 9 sections, 175.4s of 221.3s flagged as voiced (plausible for a vocal pop track).
+
+### 5. Deviations from the plan
+
+1. **The gpu-worker image was not actually rebuilt after `pyproject.toml`'s N1 dependency additions landed, despite the plan and earlier validation implying it was.** The running container had been `docker compose restart`ed (code-only, bind-mounted) rather than rebuilt, so `all-in-one-infer` genuinely wasn't installed in the container that picked up the N4 job chain. First real upload failed with `No module named 'allin1_infer'` after separation succeeded (confirming the chain-deferral logic itself was correct). Fixed by `docker compose build gpu-worker` (confirmed the Dockerfile's `COPY pyproject.toml` layer cache was already correctly keyed to the edited file) then `docker compose up -d gpu-worker` to recreate the container from the new image. **Lesson, not yet automated:** Python package changes need an image rebuild; `.py` file changes don't. No `Makefile` target currently distinguishes these for a developer to remember by rote.
+2. **Found and fixed: `/internal/blob-authz` didn't know about `song_analyses.analysis_blob_sha256`.** The authz query only checked `Song.source_blob_sha256` and `Stem.blob_sha256`; N4's analysis JSON blob (a third, independently content-addressed artifact) would have 403'd for its owner. Caught by the plan's own §5 acceptance check ("blob fetches via Caddy with Range support") before anything shipped unnoticed. Fixed by adding a third join against `SongAnalysis` in `elums/api/routers/internal.py`.
+3. **`GET /api/songs/{id}/ingest` returns 404 for a private song to a non-owner (including anonymous), not 403.** The plan's own acceptance wording said "expect 403"; implemented as 404 instead, matching the existing `Song`-lookup convention elsewhere in `songs.py` (distinguishing "exists but you can't see it" from "doesn't exist" leaks the former, so both collapse to the same 404 — same reasoning `elums/api/routers/auth.py`'s login already uses for wrong-email vs wrong-password). `/internal/blob-authz` still returns a literal 403 for blobs, since that endpoint's whole contract is "Caddy copies this status straight back" and a byte-range 404 vs 403 distinction doesn't carry the same leak.
+4. **`openapi.json` regeneration needed a `.NET`-level UTF-8-no-BOM write, not `Out-File`.** Windows PowerShell 5.1's `Out-File -Encoding utf8` always emits a BOM (even with `-NoNewline`), which breaks `python -m json.load` and, more importantly, would have broken `openapi-ts`'s own JSON parse. No `utf8NoBOM` encoding name exists in this PowerShell version either (that's a PowerShell 7+ addition). Worked around with `[System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding $false))`. The Makefile's `openapi` target already warns about this exact class of problem for a plain `>` redirect; worth updating its comment to name the fix for PowerShell 5.1 specifically, since `make` itself isn't reliably on PATH yet (§7, carried from Day 1).
+5. **`pytest`'s default collection walked `./models/hf-cache`** (populated by N1's HF/torch.hub downloads) and crashed with `OSError: [WinError 1920]` trying to `stat()` entries there from Windows host Python. Fixed by adding `testpaths = ["tests"]` to `[tool.pytest.ini_options]` — correct regardless of the Windows bug, since nothing outside `tests/` should ever have been collected.
+6. **`tests/test_separation.py`'s terminal-status assertion implicitly got slower**, not because anything broke, but because N4 means `ingest_job.status` no longer reaches `SUCCEEDED` right after separation — the chain now continues through `structure_beats`/`rms_vad`. `POLL_TIMEOUT_S` raised 90s → 180s to cover the whole chain on the 20-second synthetic fixture (ran well within the new budget in practice: all three stages together on the fixture took well under a minute).
+
+### 6. Blockers
+
+- **MA-3's deployment decision for the Smule box is still open** (carried from Day 1, §6) — user is deferring this to Monday's email to Smule rather than deciding unilaterally tonight. Not resolved; not blocking tonight's N1–N5 work, which was entirely local.
+- **GTSinger VM download status (EC-6) not re-checked tonight.**
+
+### 7. Loose ends carried forward
+
+- Everything in Day 1's §7 not explicitly resolved above (git remote still absent; `make` PATH issue; A4's healthcheck gap; dev-DB test-user residue; GTSinger re-check).
+- **The first real-song upload's analysis data is partially lost**, not recoverable without re-running: "Fill Me Up" (268.3s) failed at `structure_beats` due to the stale-image issue (§5 item 1) before `all-in-one-infer` was actually present, so no real timing/analysis exists for that track. Only "Is This All" (221.3s) has a clean full-chain run tonight. Re-run "Fill Me Up" on a day with headroom if a second real-song data point matters.
+- **No `tests/test_structure.py`-style coverage exists for `elums/ingest/structure.py` itself** (the `harmonix-all` call path) — only the two N2 modules with real deterministic logic (`key.py`'s KS correlation, `vad.py`'s run-detection/merge/cap) got unit tests; `structure.py` is only exercised indirectly, end-to-end, via `tests/test_separation.py`'s now-longer-running live-stack test. This matches the plan's own "tests on the logic, not the models" principle, but is worth stating explicitly rather than looking like an oversight.
+- **`step_index`/`step_total` on `ingest_jobs` are not really tracking the 7-stage pipeline** — they were designed (Day 1) to show progress *within* one stage, and N4's `run_rms_vad` sets `step_index = step_total` as a blunt "done" signal rather than a meaningful fraction. The per-stage `*_status` columns are the real source of truth for the SPA's 7-dot display; `step_index`/`step_total` should either be repurposed or dropped on a day with headroom.
+- **No commits pushed to GitHub** — no remote configured (carried from Day 1, §7's "absent git remote").

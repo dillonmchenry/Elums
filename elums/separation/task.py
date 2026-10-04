@@ -12,6 +12,15 @@ which the torch-free `app` image deliberately does not have (§11.6).
 NAME (`app.configure_task(name="elums.separation.task.separate", ...)`)
 for exactly that reason — see that router's comment.
 
+Sun Oct 4 (N4, IMPLEMENTATION_PLAN_2026-10-04.md): on success this now
+defers `elums.ingest.tasks.run_structure_beats` by name (same "defer by
+NAME, not by import" reasoning — this module still must not import
+elums.ingest.tasks, or anything that chain eventually imports, to keep
+this file's own import graph minimal and testable) rather than marking
+the overall `ingest_job.status` terminal. Day 1's "SUCCEEDED after
+separation" was always provisional — the schema had six more stage
+columns sitting at PENDING — and today is where that stops being true.
+
 Failure handling (IMPLEMENTATION_PLAN_2026-10-03.md M8's table):
   - checkpoint not yet downloaded -> retry with backoff (Procrastinate's
     own `retry=` below, scoped to `CheckpointNotReadyError` only)
@@ -57,6 +66,11 @@ from elums.separation.engine import (
 )
 
 logger = structlog.get_logger()
+
+# N4: deferred by NAME, not by importing elums.ingest.tasks — see this
+# module's docstring and elums/api/routers/songs.py's identical pattern
+# for `_SEPARATION_TASK_NAME`.
+_STRUCTURE_BEATS_TASK_NAME = "elums.ingest.tasks.run_structure_beats"
 
 
 async def _get_ingest_job(db: AsyncSession, song_id: uuid.UUID) -> IngestJob | None:
@@ -184,11 +198,12 @@ async def separate(song_id: str, segment_size: int = DEFAULT_SEGMENT_SIZE) -> No
 
         ingest_job = await _get_ingest_job(db, song_uuid)
         if ingest_job is not None:
-            ingest_job.status = IngestJobStatus.SUCCEEDED
+            # N4: no longer terminal — separation.status is RUNNING with
+            # the *stage* marked SUCCEEDED, and structure_beats picks up
+            # next. See this module's docstring.
             ingest_job.separation_status = IngestJobStatus.SUCCEEDED
             ingest_job.step_index = 1
-            ingest_job.message = "Separation complete."
-            ingest_job.completed_at = datetime.now(UTC)
+            ingest_job.message = "Separation complete. Starting structure analysis..."
             ingest_job.stage_results = {
                 **ingest_job.stage_results,
                 "separation": {
@@ -209,3 +224,11 @@ async def separate(song_id: str, segment_size: int = DEFAULT_SEGMENT_SIZE) -> No
         vram_peak_mb=output.vram_peak_mb,
         segment_size=segment_size,
     )
+
+    # N4: chain into structure/beats/key next, deferred by name (see this
+    # module's docstring) — shares the `gpu:separation` lock, so it waits
+    # its turn rather than racing a concurrently-uploaded song's
+    # separation job.
+    await app.configure_task(
+        name=_STRUCTURE_BEATS_TASK_NAME, queue="gpu", lock="gpu:separation"
+    ).defer_async(song_id=song_id)

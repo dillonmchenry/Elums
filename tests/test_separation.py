@@ -2,10 +2,15 @@
 this file (`pytest -m "not gpu"`) on a machine with no `gpu-worker`
 running or no checkpoint on disk.
 
-Polls the `ingest_jobs`/`stems` tables directly rather than through an
-HTTP endpoint: no `GET /api/songs/{id}` status route exists yet (a later
-milestone's job, once the SPA needs to poll it) — this test only needs to
-observe the result, not exercise an API surface that doesn't exist.
+Polls the `ingest_jobs`/`stems` tables directly rather than through
+`GET /api/songs/{id}/ingest` (which does exist as of N4, Oct 4 —
+elums/api/routers/songs.py) — a raw DB read stays simpler for a test that
+only needs the terminal state, not the HTTP surface a real client uses.
+
+N4 note: `status` no longer reaches SUCCEEDED right after separation —
+the chain now continues through structure_beats/rms_vad (N4), so this
+test's poll observes the end of that whole chain on this fixture, not
+just separation. POLL_TIMEOUT_S accounts for that.
 """
 
 from __future__ import annotations
@@ -22,7 +27,9 @@ import pytest
 pytestmark = pytest.mark.gpu
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-POLL_TIMEOUT_S = 90
+# N4: covers separation + structure_beats (its own HTDemucs pass, plus the
+# harmonix-all 8-fold ensemble) + rms_vad now, not just separation alone.
+POLL_TIMEOUT_S = 180
 POLL_INTERVAL_S = 2
 
 

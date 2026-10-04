@@ -12,7 +12,16 @@ id_*
 # Anchored to repo root (leading /): an unanchored "models/" also matched
 # elums/models/, Python package of the ingest_jobs model — it was silently
 # excluded from `git add` until this was caught directly Oct 3 2026 (M4).
-/data/
+# `/data/*` rather than `/data/` so git still descends into the directory
+# to evaluate the re-inclusion rules below — a bare `/data/` exclusion
+# stops traversal entirely and a nested `!` negation silently has no
+# effect, verified directly Oct 4 2026 (N5).
+/data/*
+# Exception, same pattern as !.env.example above: this is provenance/
+# attribution documentation, not regenerable data.
+!/data/samples/
+/data/samples/*
+!/data/samples/README.md
 /models/
 
 # Python

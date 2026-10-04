@@ -1,10 +1,435 @@
 {
+  "components": {
+    "schemas": {
+      "Body_upload_song_api_songs_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/SongVisibility",
+            "default": "private"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_song_api_songs_post",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IngestJobPublic": {
+        "description": "Sun Oct 4 (N4): closes the gap PROGRESS.md's Day 1 loose ends\nflagged \u2014 \"no HTTP endpoint exists yet for polling an ingest job's\nstatus,\" with tests/test_separation.py reaching into the DB directly\nas a stand-in. The SPA's progress poll (elums/api/routers/songs.py's\n`GET /songs/{song_id}/ingest`) is the real consumer.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "ctc_alignment_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestJobStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "f0_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "lyrics_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "note_grid_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "rms_vad_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "separation_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "step_index": {
+            "title": "Step Index",
+            "type": "integer"
+          },
+          "step_total": {
+            "title": "Step Total",
+            "type": "integer"
+          },
+          "structure_beats_status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          }
+        },
+        "required": [
+          "status",
+          "current_stage",
+          "separation_status",
+          "structure_beats_status",
+          "rms_vad_status",
+          "lyrics_status",
+          "ctc_alignment_status",
+          "f0_status",
+          "note_grid_status",
+          "step_index",
+          "step_total",
+          "message",
+          "error_message",
+          "completed_at"
+        ],
+        "title": "IngestJobPublic",
+        "type": "object"
+      },
+      "IngestJobStage": {
+        "enum": [
+          "separation",
+          "structure_beats",
+          "rms_vad",
+          "lyrics",
+          "ctc_alignment",
+          "f0",
+          "note_grid"
+        ],
+        "title": "IngestJobStage",
+        "type": "string"
+      },
+      "IngestJobStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "failed",
+          "skipped"
+        ],
+        "title": "IngestJobStatus",
+        "type": "string"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "display_name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "display_name",
+          "password"
+        ],
+        "title": "RegisterRequest",
+        "type": "object"
+      },
+      "SongPublic": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "source_blob_sha256": {
+            "title": "Source Blob Sha256",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uploaded_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By User Id"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/SongVisibility"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source_blob_sha256",
+          "visibility",
+          "uploaded_by_user_id"
+        ],
+        "title": "SongPublic",
+        "type": "object"
+      },
+      "SongVisibility": {
+        "enum": [
+          "private",
+          "public"
+        ],
+        "title": "SongVisibility",
+        "type": "string"
+      },
+      "UserPublic": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name"
+        ],
+        "title": "UserPublic",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
   "info": {
     "title": "Elums API",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/healthz": {
       "get": {
         "operationId": "healthz_api_healthz_get",
@@ -25,6 +450,158 @@
         "summary": "Healthz",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "me_api_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/songs": {
+      "post": {
+        "operationId": "upload_song_api_songs_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_song_api_songs_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Song",
+        "tags": [
+          "songs"
+        ]
+      }
+    },
+    "/api/songs/{song_id}/ingest": {
+      "get": {
+        "description": "Sun Oct 4 (N4): closes PROGRESS.md's Day 1 loose end \u2014 the SPA's\nprogress poll had no real endpoint to call and\ntests/test_separation.py stood in with a raw DB query.\n\nOwner-or-public, same rule `/internal/blob-authz` already enforces\nfor blob bytes (elums/api/routers/internal.py) \u2014 deliberately NOT\n`Depends(get_current_user)`, which hard-401s with no cookie at all;\na public song's ingest status is meant to be visible anonymously,\nthe same as its blobs.",
+        "operationId": "get_ingest_status_api_songs__song_id__ingest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "song_id",
+            "required": true,
+            "schema": {
+              "title": "Song Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestJobPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ingest Status",
+        "tags": [
+          "songs"
+        ]
+      }
+    },
+    "/api/users/{user_id}/following": {
+      "get": {
+        "operationId": "get_following_api_users__user_id__following_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserPublic"
+                  },
+                  "title": "Response Get Following Api Users  User Id  Following Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Following",
+        "tags": [
+          "users"
         ]
       }
     }

@@ -7,14 +7,16 @@ IMPLEMENTATION_PLAN_2026-10-03.md M7.
 
 from __future__ import annotations
 
+import uuid
 from typing import BinaryIO
 
-from fastapi import APIRouter, Depends, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from elums.api.deps import get_blob_store, get_current_user, get_db
 from elums.api.errors import ApiError
+from elums.auth.sessions import get_session_by_token
 from elums.blobs.service import record_blob
 from elums.blobs.store import BlobStore
 from elums.config import settings
@@ -23,7 +25,7 @@ from elums.jobs.app import app as procrastinate_app
 from elums.models.ingest_job import IngestJob
 from elums.models.song import Song, SongVisibility
 from elums.models.user import User
-from elums.schemas.songs import SongPublic
+from elums.schemas.songs import IngestJobPublic, SongPublic
 
 router = APIRouter(prefix="/songs", tags=["songs"])
 
@@ -146,3 +148,42 @@ async def upload_song(
     ).defer_async(song_id=str(song.id))
 
     return song
+
+
+@router.get("/{song_id}/ingest", response_model=IngestJobPublic)
+async def get_ingest_status(
+    song_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> IngestJob:
+    """Sun Oct 4 (N4): closes PROGRESS.md's Day 1 loose end — the SPA's
+    progress poll had no real endpoint to call and
+    tests/test_separation.py stood in with a raw DB query.
+
+    Owner-or-public, same rule `/internal/blob-authz` already enforces
+    for blob bytes (elums/api/routers/internal.py) — deliberately NOT
+    `Depends(get_current_user)`, which hard-401s with no cookie at all;
+    a public song's ingest status is meant to be visible anonymously,
+    the same as its blobs.
+    """
+    try:
+        song_uuid = uuid.UUID(song_id)
+    except ValueError as exc:
+        raise ApiError("not_found", "No such song.", status_code=404) from exc
+
+    song = await db.get(Song, song_uuid)
+    if song is None:
+        raise ApiError("not_found", "No such song.", status_code=404)
+
+    if song.visibility is not SongVisibility.PUBLIC:
+        raw_token = request.cookies.get(settings.session_cookie_name)
+        session = await get_session_by_token(db, raw_token) if raw_token else None
+        if session is None or session.user_id != song.uploaded_by_user_id:
+            raise ApiError("not_found", "No such song.", status_code=404)
+
+    result = await db.execute(select(IngestJob).where(IngestJob.song_id == song_uuid))
+    ingest_job = result.scalar_one_or_none()
+    if ingest_job is None:
+        raise ApiError("not_found", "No ingest job for this song.", status_code=404)
+
+    return ingest_job

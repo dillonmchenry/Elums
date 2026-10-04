@@ -14,3 +14,8 @@ from __future__ import annotations
 
 from elums.jobs.app import app  # noqa: F401  (re-exported for the `--app=` CLI string)
 from elums.separation import task  # noqa: F401  (import side effect: registers `separate`)
+
+# Sun Oct 4 (N4): registers `run_structure_beats`/`run_rms_vad` the same
+# way — this module also imports torch (via elums.ingest.structure), so
+# it lives behind the same gpu-worker-only entrypoint.
+from elums.ingest import tasks as ingest_tasks  # noqa: F401,E402
