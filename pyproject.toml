@@ -19,7 +19,11 @@ core = [
     "alembic==1.20.0",
     "pydantic-settings==2.15.0",
     "structlog==26.1.0",
-    "procrastinate[psycopg]==3.10.0",
+    # No [psycopg] extra: procrastinate 3.10 depends on psycopg[pool]
+    # unconditionally now — verified against PyPI's requires_dist directly
+    # Oct 3 2026; the extra name doesn't exist and uv was silently
+    # ignoring it (warning, not error) rather than failing the sync.
+    "procrastinate==3.10.0",
 ]
 
 # "app" stays torch-free so the api/worker image rebuilds fast on every
@@ -49,6 +53,16 @@ gpu = [
     # (see docs/licensing-audit.md / config/models.yaml EC-5 notes). Must be
     # pinned explicitly or the gpu image crashes on import.
     "audioread>=3.1.0",
+]
+
+# "dev" is host-side only — pytest hits the real running compose stack
+# through the ssh-tunnel/exposed port (http://localhost:8080), not an
+# in-process ASGI transport, so this validates docker-compose.yaml and
+# Caddy's reverse_proxy, not just the FastAPI app in isolation. Never
+# installed into any image.
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
 ]
 
 [[tool.uv.index]]

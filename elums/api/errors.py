@@ -11,9 +11,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+# Stable snake_case codes for the handful of HTTPExceptions FastAPI/Starlette
+# raise themselves (unmatched route, wrong method) — anything we raise
+# ourselves should use ApiError with an explicit code instead.
+_STATUS_CODE_NAMES: dict[int, str] = {
+    status.HTTP_404_NOT_FOUND: "not_found",
+    status.HTTP_405_METHOD_NOT_ALLOWED: "method_not_allowed",
+}
 
 
 class ApiError(Exception):
@@ -45,6 +53,16 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message, exc.details),
+        )
+
+    @app.exception_handler(HTTPException)
+    async def _handle_http_exception(_: Request, exc: HTTPException) -> JSONResponse:
+        code = _STATUS_CODE_NAMES.get(exc.status_code, "http_error")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed."
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_body(code, message),
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

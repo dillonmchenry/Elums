@@ -1,4 +1,4 @@
-.PHONY: up down build migrate seed logs ps verify-gpu
+.PHONY: up down build migrate seed logs ps verify-gpu test
 
 # M4 EC-8: `make` was missing locally (Windows) — installed via
 # `winget install ezwinports.make`. No Windows-only logic lives here;
@@ -32,6 +32,13 @@ ps:
 
 verify-gpu:
 	docker compose run --rm -e EXPECTED_SM_ARCH=$${EXPECTED_SM_ARCH:-sm_86} gpu-worker python scripts/verify_gpu.py
+
+# Host-side, against the real running stack (make up first) — see
+# tests/conftest.py. `uv sync --group dev` installs pytest/httpx into a
+# local .venv, never into any image.
+test:
+	uv sync --group dev
+	uv run pytest -q
 
 .env:
 	cp .env.example .env
