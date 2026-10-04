@@ -6,15 +6,39 @@ requires-python = ">=3.13,<3.14"
 dependencies = []
 
 [dependency-groups]
-# "app" (the default group) stays torch-free so the api/worker image rebuilds
-# fast on every code change — see ELUMS_TECHNICAL_APPROACH.md §11.6 and
-# IMPLEMENTATION_PLAN_2026-10-03.md M4. Populated starting M4.
-app = []
+# "core" is config/logging/db/queue — needed by every process (api, worker,
+# gpu-worker alike), so both "app" and "gpu" include it rather than each
+# process importing elums.config/elums.jobs.app and hitting ImportError.
+core = [
+    # [asyncio] extra, not bare sqlalchemy: AsyncSession needs `greenlet`,
+    # which is not pulled in otherwise — hit directly Oct 3 2026 (M4):
+    # ImportError at api startup, "SQLAlchemy asyncio module requires
+    # that the Python 'greenlet' library is installed."
+    "sqlalchemy[asyncio]==2.1.3",
+    "psycopg[binary]==3.3.6",
+    "alembic==1.20.0",
+    "pydantic-settings==2.15.0",
+    "structlog==26.1.0",
+    "procrastinate[psycopg]==3.10.0",
+]
+
+# "app" stays torch-free so the api/worker image rebuilds fast on every
+# code change — see ELUMS_TECHNICAL_APPROACH.md §11.6 and
+# IMPLEMENTATION_PLAN_2026-10-03.md M4.
+app = [
+    { include-group = "core" },
+    "fastapi==0.142.2",
+    "uvicorn[standard]==0.54.0",
+    "argon2-cffi==25.1.0",
+    "valkey==6.1.1",
+]
 
 # "gpu" is the audio/ML stack. Torch is pinned to the cu130 index for both
 # machines (§3.2 of the implementation plan) — one wheel yields sm_86
-# locally and sm_120 on the VM, verified in M3.
+# locally and sm_120 on the VM, verified in M3. Includes "core" too: the
+# gpu-worker process still needs elums.config/elums.jobs.app to run tasks.
 gpu = [
+    { include-group = "core" },
     "torch==2.14.1",
     # audio-separator[cpu]: prefer the CPU-only onnxruntime extra even in the
     # gpu image, per §3.3 — Mel-Band RoFormer is a torch model, and pulling

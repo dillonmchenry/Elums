@@ -8,9 +8,12 @@ id_*
 *_rsa
 *_ed25519
 
-# Data and models — VM-only / regenerable, never committed
-data/
-models/
+# Data and models — VM-only / regenerable, never committed.
+# Anchored to repo root (leading /): an unanchored "models/" also matched
+# elums/models/, Python package of the ingest_jobs model — it was silently
+# excluded from `git add` until this was caught directly Oct 3 2026 (M4).
+/data/
+/models/
 
 # Python
 __pycache__/
@@ -29,9 +32,9 @@ node_modules/
 frontend/dist/
 .vite/
 
-# Build artifacts
-dist/
-build/
+# Build artifacts (anchored — same lesson as /models/ above)
+/dist/
+/build/
 
 # OS / editor
 .DS_Store

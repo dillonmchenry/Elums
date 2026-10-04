@@ -1,7 +1,81 @@
-# M3 scope only: a single gpu-worker service to prove the torch/cu130 pin
-# produces working sm_86 kernels locally, inside the exact image the real
-# gpu-worker will use. db/valkey/caddy/api/worker are added in M4.
+# M4: the full 6-service stack. `make up` should bring this up green on
+# either machine with no change but .env — see IMPLEMENTATION_PLAN_2026-10-03.md M4
+# and ELUMS_TECHNICAL_APPROACH.md §4/§11.6.
+#
+# Image tags verified against Docker Hub directly Oct 3 2026 (not guessed):
+#   pgvector/pgvector:pg18   — Postgres 18 + pgvector, confirmed present
+#   valkey/valkey:9.1-alpine — confirmed present
 services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: elums
+      POSTGRES_PASSWORD: elums
+      POSTGRES_DB: elums
+    # Postgres 18+ images changed their expected mount point: a single
+    # mount at /var/lib/postgresql (not .../data) that the entrypoint then
+    # manages itself with a major-version subdirectory, to support
+    # pg_upgrade --link across container upgrades. Mounting at .../data
+    # (the pre-18 convention) makes the entrypoint refuse to start — hit
+    # and fixed directly Oct 3 2026 (M4). See
+    # https://github.com/docker-library/postgres/pull/1259
+    volumes:
+      - elums-db-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5433:5432" # host-side only, for ad-hoc psql; not used by other services
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elums -d elums"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:9.1-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    image: elums:app
+    env_file: .env
+    # --reload overrides the Dockerfile's CMD for local dev; the mounted
+    # ./:/app volume below means code edits take effect without a rebuild.
+    command: ["uvicorn", "elums.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    image: elums:app
+    env_file: .env
+    # `python -m procrastinate`, not the bare `procrastinate` console
+    # script: the installed entry point does not add /app (cwd) to
+    # sys.path, so it can't import the `elums` package and fails with a
+    # generic "Could not load app" — no traceback, hit and fixed directly
+    # Oct 3 2026 (M4). `python -m` adds cwd to sys.path[0].
+    command: ["python", "-m", "procrastinate", "--app=elums.jobs.app.app", "worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
   gpu-worker:
     build:
       context: .
@@ -9,7 +83,29 @@ services:
       target: gpu
     image: elums:gpu
     gpus: all
+    env_file: .env
     environment:
       - EXPECTED_SM_ARCH=${EXPECTED_SM_ARCH:-sm_86}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    command: ["python", "-m", "procrastinate", "--app=elums.jobs.app.app", "worker", "-q", "gpu"]
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
     volumes:
+      - .:/app
       - ./models:/app/models
+      - ./data:/data
+
+  caddy:
+    image: caddy:2.11-alpine
+    ports:
+      - "127.0.0.1:8080:8080" # the ssh -L 8080 tunnel target, see ELUMS_TECHNICAL_APPROACH.md §11.6
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+
+volumes:
+  elums-db-data:

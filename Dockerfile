@@ -24,10 +24,14 @@ WORKDIR /app
 COPY pyproject.toml ./
 
 # --- app target -------------------------------------------------------
+# `--group app` is explicit: a bare `uv sync` does not install non-default
+# dependency-groups, and we deliberately did not mark `app` as a uv
+# default-group (so `uv sync --group gpu` on the VM stays torch-only).
 FROM base AS app
-RUN uv sync
+RUN uv sync --group app
 COPY . .
-CMD ["python", "-c", "print('elums app image — entrypoint added in M4')"]
+EXPOSE 8000
+CMD ["uvicorn", "elums.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # --- gpu target --------------------------------------------------------
 FROM base AS gpu
