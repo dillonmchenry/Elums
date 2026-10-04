@@ -1,0 +1,15 @@
+# M3 scope only: a single gpu-worker service to prove the torch/cu130 pin
+# produces working sm_86 kernels locally, inside the exact image the real
+# gpu-worker will use. db/valkey/caddy/api/worker are added in M4.
+services:
+  gpu-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu
+    image: elums:gpu
+    gpus: all
+    environment:
+      - EXPECTED_SM_ARCH=${EXPECTED_SM_ARCH:-sm_86}
+    volumes:
+      - ./models:/app/models

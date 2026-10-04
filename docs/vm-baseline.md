@@ -46,13 +46,21 @@ All five normal ports are in use. **This does not block the browser access patte
 
 Working as of Oct 3 2026 via two `~/.ssh/config` entries (`elums-vm` for commands, `elums-tunnel` for the long-lived browser tunnel), using the relocated key at `~/.ssh/smule_vm`. The connection banner is from vast.ai's MOTD, not an error — it always prints `"Welcome to vast.ai... Have fun!"` before the agent-guide reminder, even on success.
 
-## GPU architecture verification (M3) — not yet run
+## GPU architecture verification (M3) — PASSED
 
-`sm_120` presence and a forced kernel launch from the `torch==2.14.1+cu130` pin have **not yet been verified on this box**. That is M3's job, not M2's. Record the result here once run:
+Verified Oct 3 2026 via `uv sync --group gpu` + `uv run python scripts/verify_gpu.py` directly on the VM (no Docker — see §3.1):
 
-- [ ] `sm_120` present in `torch.cuda.get_arch_list()`
-- [ ] forced kernel launch succeeds
-- [ ] `torch.version.cuda` recorded: ___
+- [x] `sm_120` present in `torch.cuda.get_arch_list()`
+- [x] forced kernel launch succeeds
+- [x] `torch.version.cuda` recorded: `13.0`
+
+**One pin, both architectures.** The resolved arch list — `['sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120']` — contains both `sm_86` (local RTX 3070) and `sm_120` (this box), identical on both machines. §3.2's "documented fork" fallback was never needed; `torch==2.14.1` from `whl/cu130` is confirmed as the single pin for the whole project.
+
+Locally, the same check inside the `elums:gpu` Docker image (`docker compose run --rm -e EXPECTED_SM_ARCH=sm_86 gpu-worker python scripts/verify_gpu.py`) also passed.
+
+**Two build-environment findings from standing up the gpu image/sync, recorded so they aren't rediscovered:**
+- `audio-separator` needs `ffmpeg` on `PATH` even just to list or download models (crashes at init otherwise). Present on this VM already; added explicitly to the local Docker image.
+- `audio-separator` transitively depends on `diffq` (via Demucs), which compiles a C extension with no prebuilt cp313 wheel. This VM already has a compiler; `python:3.13-slim` locally does not and needed `build-essential` added.
 
 ## Consequences for the plan (cross-reference)
 

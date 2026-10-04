@@ -1,0 +1,36 @@
+[project]
+name = "elums"
+version = "0.1.0"
+description = "Elums — social karaoke web app (Smule Labs submission)"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+# "app" (the default group) stays torch-free so the api/worker image rebuilds
+# fast on every code change — see ELUMS_TECHNICAL_APPROACH.md §11.6 and
+# IMPLEMENTATION_PLAN_2026-10-03.md M4. Populated starting M4.
+app = []
+
+# "gpu" is the audio/ML stack. Torch is pinned to the cu130 index for both
+# machines (§3.2 of the implementation plan) — one wheel yields sm_86
+# locally and sm_120 on the VM, verified in M3.
+gpu = [
+    "torch==2.14.1",
+    # audio-separator[cpu]: prefer the CPU-only onnxruntime extra even in the
+    # gpu image, per §3.3 — Mel-Band RoFormer is a torch model, and pulling
+    # onnxruntime-gpu would add a second, unused CUDA runtime into the process.
+    "audio-separator[cpu]==0.47.0",
+    # Not a transitive dependency of librosa 1.0.0 despite audio-separator's
+    # uvr_lib_v5.spec_utils importing it directly — verified Oct 3 2026
+    # (see docs/licensing-audit.md / config/models.yaml EC-5 notes). Must be
+    # pinned explicitly or the gpu image crashes on import.
+    "audioread>=3.1.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
