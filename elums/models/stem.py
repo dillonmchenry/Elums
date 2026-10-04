@@ -1,8 +1,19 @@
 """Separated audio stems — M8. One row per (song, kind): `vocals` or
-`instrumental`, pointing at an immutable blob. Kept as a first-class table
-(not folded into `ingest_jobs.stage_results`) because Sunday's
-`all-in-one-infer` run needs to find these by `song_id` + `kind` directly
-via `--stems-from-dir`, per IMPLEMENTATION_PLAN_2026-10-03.md M8.
+`instrumental`, pointing at an immutable blob.
+
+Sat Oct 3's plan expected Sunday's `all-in-one-infer` structure job to
+reuse these via `--stems-from-dir`. Revised directly in
+IMPLEMENTATION_PLAN_2026-10-04.md §3: that model consumes FOUR demucs
+stems (bass/drums/other/vocals) and its embeddings are shaped
+[stems=4, time, 24] — substituting these two for "other"/"vocals" with
+silent bass/drums would run it off its training distribution for
+exactly the beat/downbeat/section outputs it exists to produce. So
+`elums/ingest/structure.py` runs its OWN HTDemucs on the original mix
+instead and never reads this table. Kept as a first-class table anyway
+(not folded into `ingest_jobs.stage_results`) because the vocal stem here
+is still the reference audio for everything downstream of separation:
+Monday's lyrics/VAD, Tuesday's F0/note-grid, and every later take
+comparison.
 
 Unique on (song_id, kind): a rerun (job killed mid-run, requeued at a
 smaller segment size after OOM) upserts in place rather than
