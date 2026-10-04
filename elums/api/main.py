@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from elums.api.errors import install_error_handlers
-from elums.api.routers import health
+from elums.api.routers import auth, health, users
 from elums.logging import configure_logging
 
 configure_logging()
@@ -19,3 +19,5 @@ app = FastAPI(title="Elums API")
 install_error_handlers(app)
 
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(users.router, prefix="/api")

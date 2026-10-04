@@ -35,6 +35,7 @@ app = [
     "uvicorn[standard]==0.54.0",
     "argon2-cffi==25.1.0",
     "valkey==6.1.1",
+    "email-validator==2.3.0", # pydantic's EmailStr needs this installed explicitly
 ]
 
 # "gpu" is the audio/ML stack. Torch is pinned to the cu130 index for both
@@ -63,6 +64,11 @@ gpu = [
 dev = [
     "pytest==9.1.1",
     "httpx==0.28.1",
+    # For tests/test_auth.py's DB-level invariants (no plaintext token at
+    # rest, exactly one session row per login, logout deletes the row) —
+    # connects to the db:5433 host-port exposed for "ad-hoc psql" in
+    # docker-compose.yaml. Never installed into any image.
+    "psycopg[binary]==3.3.6",
 ]
 
 [[tool.uv.index]]

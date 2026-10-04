@@ -22,7 +22,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, Index, String, Text
+from sqlalchemy import Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,10 +69,11 @@ class IngestJob(TimestampMixin, Base):
     source_blob_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_filename: Mapped[str] = mapped_column(String(512), nullable=False)
 
-    # No FK yet — `users` doesn't exist until M6. Plain UUID column so the
-    # upload flow can be exercised standalone today; the constraint is
-    # added in M6's migration once the target table exists.
-    uploaded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # FK added in M6 now that `users` exists (M4's migration shipped this
+    # column without the constraint, by design — see that commit).
+    uploaded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Overall roll-up, derived from the per-stage columns below but kept as
     # its own column so `WHERE status = 'running'` doesn't need 7 OR clauses.
