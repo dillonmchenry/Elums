@@ -4,8 +4,14 @@
 # `winget install ezwinports.make`. No Windows-only logic lives here;
 # this Makefile is identical on both machines.
 
+# BUILDX_NO_DEFAULT_ATTESTATIONS=1: without it, BuildKit's provenance
+# attestation gets a fresh manifest digest on every `--build` even with a
+# 100%-cache-hit build, so compose sees the image as "changed" and
+# recreates api/worker/gpu-worker/frontend every single `make up` — a
+# harmless few seconds, but not actually the no-op A5 requires. Found
+# directly during the M8 end-of-day validation pass.
 up: .env
-	docker compose up -d --build
+	BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose up -d --build
 	@echo "Tunnel from your laptop: ssh -L 8080:localhost:8080 elums-tunnel"
 	@echo "Then open http://localhost:8080/api/healthz"
 
