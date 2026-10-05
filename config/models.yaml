@@ -57,3 +57,36 @@ structure_beats:
       download in this package version — elums/ingest/structure.py sets
       `torch.hub.set_dir()` explicitly at import time instead, so the
       checkpoint survives container restarts under ${MODEL_ROOT}.
+
+lyrics_transcription:
+  # Mon Oct 5 (L1). The schedule names "WhisperX" but EC-1 found it
+  # fights the one-wheel discipline (HF-format weights already on disk
+  # are not CTranslate2, and whisperx's own stack targets torch<2.x-era
+  # pins) — see PROGRESS.md Day 3 EC-1. `transformers` loads the existing
+  # HF checkpoint directly; alignment is a separate stage (below), not
+  # whisperx's bundled aligner.
+  whisper_large_v3_turbo:
+    package: "transformers==5.9.0"
+    path: "${MODEL_ROOT}/whisper-large-v3-turbo"
+    format: "HF safetensors (NOT CTranslate2)"
+    license: Apache-2.0
+    resolved_on: 2026-10-05
+
+lyrics_alignment:
+  # Mon Oct 5 (L2, EC-3). torchaudio's own bundled CTC pipeline, not a
+  # separate huggingface_hub fetch — one fewer cache/credential
+  # convention, and torchaudio==2.11.0 is already pinned/co-import-
+  # verified (Day 2 EC-1).
+  wav2vec2_asr_base_960h:
+    package: "torchaudio==2.11.0"
+    pipeline: "torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H"
+    source: "fairseq wav2vec 2.0, LibriSpeech 960h fine-tune, via torchaudio's pretrained pipelines"
+    license: BSD-3-Clause  # torchaudio project license; see docs/licensing-audit.md
+    resolved_on: 2026-10-05
+
+hyphenation:
+  # Mon Oct 5 (L3, EC-5).
+  pyphen:
+    package: "pyphen==0.17.2"
+    license: MPL-1.1  # tri-licensed GPL-2.0/LGPL-2.1/MPL-1.1; MPL-1.1 selected
+    resolved_on: 2026-10-05

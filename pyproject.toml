@@ -73,6 +73,16 @@ gpu = [
     "all-in-one-infer==3.1.0",
     "torchaudio==2.11.0",
     "librosa==1.0.0",
+    # Mon Oct 5 (L1, EC-2): runs the HF-transformers-format Whisper
+    # large-v3-turbo checkpoint already on disk at
+    # ${MODEL_ROOT}/whisper-large-v3-turbo (NOT CTranslate2 — whisperx was
+    # evaluated and rejected, see PROGRESS.md Day 3 EC-1). Pinned
+    # explicitly; verified `uv lock` does not move torch/torchaudio.
+    "transformers==5.9.0",  # 4.57.0 is yanked on PyPI (setup bug); verified not yanked.
+    # Mon Oct 5 (L3, EC-5): hyphenation dictionary for syllable split
+    # points. Tri-licensed GPL-2.0/LGPL-2.1/MPL-1.1 — shipped under
+    # MPL-1.1, recorded in docs/licensing-audit.md.
+    "pyphen==0.17.2",
 ]
 
 # "dev" is host-side only — pytest hits the real running compose stack
@@ -83,6 +93,11 @@ gpu = [
 dev = [
     "pytest==9.1.1",
     "httpx==0.28.1",
+    # Mon Oct 5 (L3): tests/test_lyrics.py exercises elums/ingest/syllables.py
+    # on the host, same as elums/ingest/vad.py's deterministic pieces would
+    # if they didn't also need librosa (gpu-only) at module scope — pyphen
+    # is pure Python, no GPU/torch dependency, safe in "dev" too.
+    "pyphen==0.17.2",
     # For tests/test_auth.py's DB-level invariants (no plaintext token at
     # rest, exactly one session row per login, logout deletes the row) —
     # connects to the db:5433 host-port exposed for "ad-hoc psql" in

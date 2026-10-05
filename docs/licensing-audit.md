@@ -30,6 +30,25 @@ Ongoing log of license verification for every third-party model, dataset, and pa
 
 - GitHub API reports `license: NOASSERTION` (27 stars). Matches risk 10 in the approach document (single-maintainer fork). License text itself not yet re-read in full; re-verify before Sun Oct 4 when this becomes load-bearing.
 
+### `transformers` (PyPI package, Hugging Face)
+
+- **Resolved Mon Oct 5 (L1, EC-2):** runs the HF-transformers-format `whisper-large-v3-turbo` checkpoint already on disk — `whisperx` was evaluated and rejected (see PROGRESS.md Day 3 EC-1); `transformers` is the library that actually loads that checkpoint.
+- PyPI/GitHub: **Apache-2.0**. `transformers==4.57.0` (the version named in the Oct 5 plan's dependency surface) is **yanked on PyPI** ("Error in the setup causing installation issues", verified via `pypi.org/pypi/transformers/json` Oct 5 2026) — pinned to `5.9.0` instead, the newest non-yanked release at lock time.
+- **Verdict: Apache-2.0. Clear to ship.**
+
+### `pyphen` (PyPI package, hyphenation dictionaries)
+
+- **Resolved Mon Oct 5 (L3, EC-5):** syllable split points for the hyphenation grouping step.
+- PyPI metadata: tri-licensed **GPL-2.0 / LGPL-2.1 / MPL-1.1**, per the Oct 5 plan's own finding. Shipped under **MPL-1.1** (the permissive option of the three; does not trigger GPL/LGPL copyleft obligations for Elums' own code, which is not itself GPL/LGPL).
+- `cmudict` (BSD-2) was considered as the cleaner alternative (per the plan's own suggestion) but not used: `pyphen`'s `hyphenate_word` returns direct character-offset split points compatible with L2's char-level spans, whereas `cmudict`'s phoneme counts would need a second mapping step back to character offsets with no corresponding win in license cleanliness once MPL-1.1 is selected.
+- **Verdict: MPL-1.1. Clear to ship.**
+
+### `torchaudio`'s `WAV2VEC2_ASR_BASE_960H` bundle (CTC alignment model, L2)
+
+- **Resolved Mon Oct 5 (L2, EC-3):** wav2vec2 CTC emissions for forced alignment, torchaudio's own bundled pipeline (`torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H`) rather than a separate `facebook/wav2vec2-base-960h` fetch via `huggingface_hub` — keeps the download path identical to `structure_beats`' existing `torch.hub.set_dir()`-rooted cache (no second credential/cache convention for one more checkpoint).
+- Underlying checkpoint: fairseq's wav2vec 2.0 ASR base model, fine-tuned on LibriSpeech 960h — distributed by the torchaudio project itself as part of its pretrained-pipelines surface, under torchaudio's own **BSD-3-Clause** project license (verified via `pytorch/audio` GitHub repo license, Oct 5 2026). No separate NC/restrictive license attaches to pipeline weights distributed this way (distinct from madmom's case, EC-3 of the approach doc's risk register).
+- **Verdict: BSD-3-Clause. Clear to ship.**
+
 ## Datasets
 
 ### `GTSinger/GTSinger`, `smulelabs/NanoPitch-PreExtract`, `laion/larger_clap_music_and_speech`
