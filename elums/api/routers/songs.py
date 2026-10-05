@@ -20,7 +20,7 @@ from elums.auth.sessions import get_session_by_token
 from elums.blobs.service import record_blob
 from elums.blobs.store import BlobStore
 from elums.config import settings
-from elums.ingest.probe import UndecodableAudioError, probe_audio
+from elums.ingest.probe import UndecodableAudioError, probe_audio, split_artist_title_from_filename
 from elums.jobs.app import app as procrastinate_app
 from elums.models.ingest_job import IngestJob
 from elums.models.song import Song, SongVisibility
@@ -111,9 +111,15 @@ async def upload_song(
     song = existing.scalar_one_or_none()
 
     if song is None:
+        # Mon Oct 5 (L1): prefer the file's own ID3/vorsbis tags over the
+        # upload filename for both title and artist — fall back to
+        # splitting "Artist - Title" out of the filename only where tags
+        # are absent (elums/ingest/probe.py's split_artist_title_from_filename).
+        fallback_artist, fallback_title = split_artist_title_from_filename(file.filename or "")
         song = Song(
             uploaded_by_user_id=current_user.id,
-            title=title or (file.filename or "Untitled"),
+            title=title or probe.title or fallback_title or (file.filename or "Untitled"),
+            artist=probe.artist or fallback_artist,
             source_blob_sha256=ref.sha256,
             visibility=visibility,
         )

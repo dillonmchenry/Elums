@@ -12,6 +12,7 @@ from elums.models.song import SongVisibility
 class SongPublic(BaseModel):
     id: uuid.UUID
     title: str
+    artist: str | None
     source_blob_sha256: str
     visibility: SongVisibility
     uploaded_by_user_id: uuid.UUID | None

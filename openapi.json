@@ -215,6 +215,17 @@
       },
       "SongPublic": {
         "properties": {
+          "artist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artist"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -247,6 +258,7 @@
         "required": [
           "id",
           "title",
+          "artist",
           "source_blob_sha256",
           "visibility",
           "uploaded_by_user_id"

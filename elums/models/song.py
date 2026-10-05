@@ -46,6 +46,12 @@ class Song(TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Mon Oct 5 (L1, IMPLEMENTATION_PLAN_2026-10-05.md §4's "metadata
+    # gap"): LRCLIB's /api/get needs artist_name + track_name + duration.
+    # Nullable — populated from ffprobe's ID3/vorbis tags where present,
+    # else the upload filename's "Artist - Title" split
+    # (elums/ingest/probe.py), else left unset (Whisper-only lyrics path).
+    artist: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_blob_sha256: Mapped[str] = mapped_column(
         String(64), ForeignKey("blobs.sha256"), nullable=False, index=True
     )
