@@ -1,15 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   healthzApiHealthzGet,
+  meApiMeGet,
   uploadSongApiSongsPost,
   getIngestStatusApiSongsSongIdIngestGet,
 } from "../client";
-import type { IngestJobPublic } from "../client";
+import type { IngestJobPublic, UserPublic } from "../client";
 
 type HealthState =
   | { kind: "loading" }
   | { kind: "ok"; body: Record<string, unknown> }
   | { kind: "error"; message: string };
+
+// Mon Oct 5 (L0): current-user banner, link to /login on 401 — so a
+// tester lands here, sees they're logged out, and knows where to go
+// rather than hitting an upload form that silently 401s.
+type AuthState = { kind: "loading" } | { kind: "authenticated"; user: UserPublic } | { kind: "anonymous" };
 
 // N4 (Oct 4): minimal ingest progress UI — IMPLEMENTATION_PLAN_2026-10-04.md's
 // "7 stage labels with status, refreshed every 2s". No upload form existed
@@ -41,6 +48,7 @@ function StageStatus({ job }: { job: IngestJobPublic }) {
 
 export function HomePage() {
   const [health, setHealth] = useState<HealthState>({ kind: "loading" });
+  const [auth, setAuth] = useState<AuthState>({ kind: "loading" });
   const [songId, setSongId] = useState<string | null>(null);
   const [job, setJob] = useState<IngestJobPublic | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -56,6 +64,14 @@ export function HomePage() {
         }
       })
       .catch((err: unknown) => setHealth({ kind: "error", message: String(err) }));
+  }, []);
+
+  useEffect(() => {
+    meApiMeGet()
+      .then(({ data, error }) => {
+        setAuth(!error && data ? { kind: "authenticated", user: data } : { kind: "anonymous" });
+      })
+      .catch(() => setAuth({ kind: "anonymous" }));
   }, []);
 
   useEffect(() => {
@@ -106,6 +122,16 @@ export function HomePage() {
         {health.kind === "loading" && "Checking API health…"}
         {health.kind === "ok" && `API: ${JSON.stringify(health.body)}`}
         {health.kind === "error" && `API unreachable: ${health.message}`}
+      </p>
+
+      <p data-testid="auth-status">
+        {auth.kind === "loading" && "Checking login…"}
+        {auth.kind === "authenticated" && `Logged in as ${auth.user.display_name}`}
+        {auth.kind === "anonymous" && (
+          <>
+            Not logged in. <Link to="/login">Log in</Link> to upload a song.
+          </>
+        )}
       </p>
 
       <form onSubmit={handleUpload}>

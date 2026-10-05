@@ -5,6 +5,7 @@ import App from "./App";
 
 vi.mock("./client", () => ({
   healthzApiHealthzGet: vi.fn().mockResolvedValue({ data: { status: "ok" }, error: undefined }),
+  meApiMeGet: vi.fn().mockResolvedValue({ data: undefined, error: { detail: "not authenticated" } }),
 }));
 vi.mock("./apiClient", () => ({}));
 
