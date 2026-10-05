@@ -49,6 +49,15 @@ class SongAnalysis(TimestampMixin, Base):
     section_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     voiced_duration_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
+    # Mon Oct 5 (L4): "lrclib" (LRCLIB text, ASR never ran or wasn't
+    # needed), "whisper" (no usable LRCLIB hit), or "reconciled" (LRCLIB
+    # text anchored onto ASR/CTC timings via the LCS reconciliation in
+    # elums/ingest/syllables.py). Nullable until the lyrics stage runs.
+    lyrics_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    syllable_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    vocable_event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # The full artifact: beats[], downbeats[], sections[], the 24-way key
     # correlation vector, VAD spans — fetched whole by the client, never
     # queried into (§4's reasoning for M8's stem blobs applies identically
