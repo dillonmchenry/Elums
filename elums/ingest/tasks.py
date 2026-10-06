@@ -785,6 +785,15 @@ async def run_note_grid(song_id: str) -> None:
     key_tonic = artifact.get("key", {}).get("tonic")
     key_mode = artifact.get("key", {}).get("mode")
 
+    import time
+
+    # Found via the 8-song validation pass (PROGRESS.md Day 4 follow-up):
+    # `note_grid`'s own `stage_results` entry never carried `duration_ms`,
+    # unlike every other stage — the plan's own acceptance check 7
+    # explicitly names `note_grid` alongside `f0` as needing it. No GPU
+    # work happens in this stage (pure numpy/soundfile, same as
+    # `run_rms_vad`), so there is no `vram_peak_mb` to measure here.
+    t0 = time.monotonic()
     try:
         notes, key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes = await asyncio.to_thread(
             build_note_grid,
@@ -801,6 +810,7 @@ async def run_note_grid(song_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         await _mark_stage_failed(song_uuid, f"Note-grid/peaks assembly failed: {exc}")
         return
+    duration_ms = int((time.monotonic() - t0) * 1000)
 
     import io
 
@@ -865,6 +875,8 @@ async def run_note_grid(song_id: str) -> None:
                 "note_grid": {
                     "model": "derivative-peak-segmentation-v1",
                     "note_count": len(notes),
+                    "duration_ms": duration_ms,
+                    "vram_peak_mb": None,
                 },
             }
             # Terminal — see this function's docstring.
@@ -877,6 +889,7 @@ async def run_note_grid(song_id: str) -> None:
         "note_grid.succeeded",
         song_id=song_id,
         note_count=len(notes),
+        duration_ms=duration_ms,
         key_tonic_from_notes=key_tonic_from_notes,
         key_mode_from_notes=key_mode_from_notes,
     )
