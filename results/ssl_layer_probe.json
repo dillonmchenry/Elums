@@ -1,0 +1,88 @@
+{
+  "model": "microsoft/wavlm-large",
+  "candidate_layers": [
+    1,
+    4,
+    7,
+    12,
+    18,
+    24
+  ],
+  "num_phoneme_spans": 30935,
+  "label_positive_rate": {
+    "mix_tech": 0.5916276062712138,
+    "falsetto_tech": 0.19954743817682236,
+    "breathy_tech": 0.10525294973331178,
+    "pharyngeal_tech": 0.12694359140132536,
+    "vibrato_tech": 0.0595442055923711,
+    "glissando_tech": 0.3069338936479716
+  },
+  "results_by_layer": {
+    "1": {
+      "macro_f1": 0.7795024581208563,
+      "per_label_f1": {
+        "mix_tech": 0.8886707795849692,
+        "falsetto_tech": 0.9578866768759571,
+        "breathy_tech": 0.8802351212343865,
+        "pharyngeal_tech": 0.9382716049382716,
+        "vibrato_tech": 0.46249033255993816,
+        "glissando_tech": 0.5494602335316149
+      }
+    },
+    "4": {
+      "macro_f1": 0.7947690133176865,
+      "per_label_f1": {
+        "mix_tech": 0.8968609865470852,
+        "falsetto_tech": 0.962533796832754,
+        "breathy_tech": 0.8789903489235338,
+        "pharyngeal_tech": 0.9211669770328988,
+        "vibrato_tech": 0.5345132743362832,
+        "glissando_tech": 0.5745486962335636
+      }
+    },
+    "7": {
+      "macro_f1": 0.7452192397151608,
+      "per_label_f1": {
+        "mix_tech": 0.8424609320005632,
+        "falsetto_tech": 0.90315229775921,
+        "breathy_tech": 0.796423658872077,
+        "pharyngeal_tech": 0.8443649373881932,
+        "vibrato_tech": 0.4977210574293528,
+        "glissando_tech": 0.5871925548415688
+      }
+    },
+    "12": {
+      "macro_f1": 0.7124301234262177,
+      "per_label_f1": {
+        "mix_tech": 0.8100731570061902,
+        "falsetto_tech": 0.8139950017850768,
+        "breathy_tech": 0.720569210866753,
+        "pharyngeal_tech": 0.8286384976525821,
+        "vibrato_tech": 0.48588537211291705,
+        "glissando_tech": 0.6154195011337869
+      }
+    },
+    "18": {
+      "macro_f1": 0.6106243567455467,
+      "per_label_f1": {
+        "mix_tech": 0.7285858731763686,
+        "falsetto_tech": 0.69164265129683,
+        "breathy_tech": 0.5560344827586207,
+        "pharyngeal_tech": 0.6609829488465396,
+        "vibrato_tech": 0.3968705547652916,
+        "glissando_tech": 0.6296296296296297
+      }
+    },
+    "24": {
+      "macro_f1": 0.6368843453942239,
+      "per_label_f1": {
+        "mix_tech": 0.7511777301927195,
+        "falsetto_tech": 0.7440918298446996,
+        "breathy_tech": 0.5990621336459554,
+        "pharyngeal_tech": 0.7019180922757906,
+        "vibrato_tech": 0.3873290136789057,
+        "glissando_tech": 0.6377272727272727
+      }
+    }
+  }
+}
