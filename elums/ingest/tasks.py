@@ -1,5 +1,7 @@
-"""The structure_beats -> rms_vad job chain — Sun Oct 4 (N4 of
-IMPLEMENTATION_PLAN_2026-10-04.md). Registered through
+"""The structure_beats -> rms_vad -> lyrics -> ctc_alignment -> f0 ->
+note_grid job chain — Sun Oct 4 (N4 of
+IMPLEMENTATION_PLAN_2026-10-04.md), extended Mon Oct 5 (L4) and Tue Oct 6
+(T1/T3 of IMPLEMENTATION_PLAN_2026-10-06.md). Registered through
 elums/jobs/gpu_app.py ONLY, same reasoning as elums/separation/task.py's
 module docstring: this imports elums.ingest.structure, which imports
 torch — the torch-free api/worker images must never import this module.
@@ -49,6 +51,9 @@ from elums.blobs.store import BlobRef, LocalBlobStore
 from elums.config import settings
 from elums.db import session_scope
 from elums.ingest.align import align_chars
+from elums.ingest.chart import assemble_chart, compute_peaks, pack_peaks_blob
+from elums.ingest.clap import ClapEmbeddingError, embed_audio
+from elums.ingest.f0 import F0ExtractionError, extract_f0, pack_f0_blob, unpack_f0_blob, voiced_frame_ratio
 from elums.ingest.key import estimate_key
 from elums.ingest.lyrics import (
     fetch_lrclib,
@@ -56,6 +61,7 @@ from elums.ingest.lyrics import (
     map_lrclib_to_vad_segments,
     transcribe_segments,
 )
+from elums.ingest.notes import build_note_grid
 from elums.ingest.structure import StructureAnalysisError, run_structure
 from elums.ingest.syllables import detect_vocable_events, group_syllables, reconcile_lyrics
 from elums.ingest.vad import segment_vocal_activity
@@ -63,6 +69,7 @@ from elums.jobs.app import app
 from elums.models.ingest_job import IngestJob, IngestJobStage, IngestJobStatus
 from elums.models.song import Song
 from elums.models.song_analysis import SongAnalysis
+from elums.models.song_embedding import SongEmbedding
 from elums.models.stem import Stem, StemKind
 
 logger = structlog.get_logger()
@@ -70,6 +77,9 @@ logger = structlog.get_logger()
 _RMS_VAD_TASK_NAME = "elums.ingest.tasks.run_rms_vad"
 _LYRICS_TASK_NAME = "elums.ingest.tasks.run_lyrics"
 _CTC_ALIGNMENT_TASK_NAME = "elums.ingest.tasks.run_ctc_alignment"
+_F0_TASK_NAME = "elums.ingest.tasks.run_f0"
+_NOTE_GRID_TASK_NAME = "elums.ingest.tasks.run_note_grid"
+_CLAP_EMBEDDING_TASK_NAME = "elums.ingest.tasks.run_clap_embedding"
 
 
 async def _get_ingest_job(db: AsyncSession, song_id: uuid.UUID) -> IngestJob | None:
@@ -457,10 +467,10 @@ async def run_ctc_alignment(song_id: str) -> None:
     """Mon Oct 5 (L2+L3+L4): wav2vec2 CTC forced alignment
     (elums/ingest/align.py), then the deterministic syllable grouping /
     LCS reconciliation / energy-gated vocable fallback
-    (elums/ingest/syllables.py). Terminal stage for today — mirrors the
-    precedent elums/separation/task.py set on Day 1 and `run_rms_vad` set
-    on Day 2: this is where `ingest_job.status` finally goes SUCCEEDED
-    and `completed_at` is set, until Tuesday's F0/note-grid stages exist.
+    (elums/ingest/syllables.py). No longer terminal as of Tue Oct 6 (T1):
+    defers `run_f0` instead of setting `status=SUCCEEDED` — the chain now
+    continues through f0 -> note_grid, which is terminal (see
+    `run_note_grid`'s docstring).
     """
     song_uuid = uuid.UUID(song_id)
 
@@ -598,11 +608,9 @@ async def run_ctc_alignment(song_id: str) -> None:
                     "vram_peak_mb": vram_peak_mb,
                 },
             }
-            # Terminal for today, same precedent elums/separation/task.py
-            # and Day 2's run_rms_vad set — see this module's docstring.
-            ingest_job.status = IngestJobStatus.SUCCEEDED
-            ingest_job.message = "Lyrics, alignment, structure, and key analysis complete."
-            ingest_job.completed_at = datetime.now(UTC)
+            # Tue Oct 6 (T1): no longer terminal — status stays RUNNING,
+            # f0 picks up next.
+            ingest_job.message = "Lyrics aligned. Extracting pitch..."
         await db.commit()
 
     logger.info(
@@ -615,3 +623,317 @@ async def run_ctc_alignment(song_id: str) -> None:
         duration_ms=duration_ms,
         vram_peak_mb=vram_peak_mb,
     )
+
+    await app.configure_task(name=_F0_TASK_NAME, queue="gpu", lock="gpu:separation").defer_async(
+        song_id=song_id
+    )
+
+
+@app.task(queue="gpu", lock="gpu:separation")
+async def run_f0(song_id: str) -> None:
+    """Tue Oct 6 (T1): per-frame F0 + confidence over the vocal stem via
+    vendored RMVPE (elums/ingest/f0.py). Shares the `gpu:separation` lock
+    — RMVPE's forward pass is GPU-bound, same reasoning as
+    `structure_beats`.
+
+    The F0 track is its OWN binary float16 blob (`f0_blob_sha256`), not
+    merged into the analysis JSON blob — §4's tiering rule.
+    """
+    song_uuid = uuid.UUID(song_id)
+
+    async with session_scope() as db:
+        ingest_job = await _get_ingest_job(db, song_uuid)
+        if ingest_job is None:
+            logger.warning("f0.job_missing", song_id=song_id)
+            return
+
+        ingest_job.current_stage = IngestJobStage.F0
+        ingest_job.f0_status = IngestJobStatus.RUNNING
+        ingest_job.message = "Extracting pitch..."
+        await db.commit()
+
+        blob_store = LocalBlobStore(settings.blob_root)
+        vocals_row = await db.execute(
+            select(Stem).where(Stem.song_id == song_uuid, Stem.kind == StemKind.VOCALS)
+        )
+        vocals_stem = vocals_row.scalar_one_or_none()
+        vocals_path = blob_store.local_path(vocals_stem.blob_sha256) if vocals_stem else None
+
+        analysis_row = await db.execute(
+            select(SongAnalysis).where(SongAnalysis.song_id == song_uuid)
+        )
+        analysis = analysis_row.scalar_one_or_none()
+
+    if vocals_path is None or analysis is None:
+        await _mark_stage_failed(song_uuid, "Vocal stem or analysis row is missing.")
+        return
+
+    try:
+        f0_track = await asyncio.to_thread(extract_f0, str(vocals_path), settings.model_root)
+    except F0ExtractionError as exc:
+        await _mark_stage_failed(song_uuid, str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001
+        await _mark_stage_failed(song_uuid, f"F0 extraction failed: {exc}")
+        return
+
+    ratio = voiced_frame_ratio(f0_track.f0_hz)
+    f0_blob_bytes = pack_f0_blob(f0_track.f0_hz, f0_track.confidence)
+    blob_store = LocalBlobStore(settings.blob_root)
+    import io
+
+    f0_blob_ref = blob_store.put(io.BytesIO(f0_blob_bytes), content_type="application/octet-stream")
+
+    async with session_scope() as db:
+        await record_blob(db, f0_blob_ref)
+
+        analysis_row = await db.execute(
+            select(SongAnalysis).where(SongAnalysis.song_id == song_uuid)
+        )
+        analysis = analysis_row.scalar_one_or_none()
+        if analysis is not None:
+            analysis.f0_blob_sha256 = f0_blob_ref.sha256
+            analysis.frame_rate_hz = f0_track.frame_rate_hz
+            analysis.voiced_frame_ratio = ratio
+            analysis.model_versions = {**analysis.model_versions, "f0": "rmvpe"}
+
+        ingest_job = await _get_ingest_job(db, song_uuid)
+        if ingest_job is not None:
+            ingest_job.f0_status = IngestJobStatus.SUCCEEDED
+            ingest_job.stage_results = {
+                **ingest_job.stage_results,
+                "f0": {
+                    "model": "rmvpe",
+                    "duration_ms": f0_track.duration_ms,
+                    "vram_peak_mb": f0_track.vram_peak_mb,
+                    "voiced_frame_ratio": ratio,
+                },
+            }
+            ingest_job.message = "Pitch extracted. Building the note grid..."
+        await db.commit()
+
+    logger.info(
+        "f0.succeeded",
+        song_id=song_id,
+        voiced_frame_ratio=ratio,
+        duration_ms=f0_track.duration_ms,
+        vram_peak_mb=f0_track.vram_peak_mb,
+    )
+
+    await app.configure_task(name=_NOTE_GRID_TASK_NAME, queue="gpu").defer_async(song_id=song_id)
+
+
+@app.task(queue="gpu")
+async def run_note_grid(song_id: str) -> None:
+    """Tue Oct 6 (T2+T3): the deterministic note-grid segmentation
+    (elums/ingest/notes.py) over the F0 track just written, then the
+    chart writer + peaks (elums/ingest/chart.py). Terminal stage — mirrors
+    the precedent elums/separation/task.py set on Day 1 and `run_rms_vad`/
+    `run_ctc_alignment` set on Day 2/3: this is where `ingest_job.status`
+    finally goes SUCCEEDED and `completed_at` is set.
+
+    Not GPU-bound (pure numpy/soundfile) — no `gpu:separation` lock, same
+    reasoning `run_rms_vad` uses.
+    """
+    song_uuid = uuid.UUID(song_id)
+
+    async with session_scope() as db:
+        song = await db.get(Song, song_uuid)
+        ingest_job = await _get_ingest_job(db, song_uuid)
+        if song is None or ingest_job is None:
+            logger.warning("note_grid.song_or_job_missing", song_id=song_id)
+            return
+
+        ingest_job.current_stage = IngestJobStage.NOTE_GRID
+        ingest_job.note_grid_status = IngestJobStatus.RUNNING
+        ingest_job.message = "Building the note grid..."
+        await db.commit()
+
+        blob_store = LocalBlobStore(settings.blob_root)
+        vocals_row = await db.execute(
+            select(Stem).where(Stem.song_id == song_uuid, Stem.kind == StemKind.VOCALS)
+        )
+        vocals_stem = vocals_row.scalar_one_or_none()
+        instrumental_row = await db.execute(
+            select(Stem).where(Stem.song_id == song_uuid, Stem.kind == StemKind.INSTRUMENTAL)
+        )
+        instrumental_stem = instrumental_row.scalar_one_or_none()
+        instrumental_path = (
+            blob_store.local_path(instrumental_stem.blob_sha256) if instrumental_stem else None
+        )
+
+        analysis_row = await db.execute(
+            select(SongAnalysis).where(SongAnalysis.song_id == song_uuid)
+        )
+        analysis = analysis_row.scalar_one_or_none()
+
+    if vocals_stem is None or instrumental_path is None or analysis is None or analysis.f0_blob_sha256 is None:
+        await _mark_stage_failed(
+            song_uuid, "Stems, analysis row, or F0 blob is missing for note-grid assembly."
+        )
+        return
+
+    blob_store = LocalBlobStore(settings.blob_root)
+    with blob_store.open(analysis.analysis_blob_sha256) as f:
+        artifact = json.loads(f.read())
+    with blob_store.open(analysis.f0_blob_sha256) as f:
+        f0_hz, confidence = unpack_f0_blob(f.read())
+
+    words = artifact.get("lyrics", {}).get("words", [])
+    vocable_events = artifact.get("lyrics", {}).get("vocable_events", [])
+    beats = artifact.get("beats", [])
+    key_tonic = artifact.get("key", {}).get("tonic")
+    key_mode = artifact.get("key", {}).get("mode")
+
+    try:
+        notes, key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes = await asyncio.to_thread(
+            build_note_grid,
+            f0_hz,
+            confidence,
+            analysis.frame_rate_hz or 100.0,
+            words,
+            vocable_events,
+            beats,
+            key_tonic,
+            key_mode,
+        )
+        peaks = await asyncio.to_thread(compute_peaks, str(instrumental_path))
+    except Exception as exc:  # noqa: BLE001
+        await _mark_stage_failed(song_uuid, f"Note-grid/peaks assembly failed: {exc}")
+        return
+
+    import io
+
+    peaks_blob_ref = blob_store.put(
+        io.BytesIO(pack_peaks_blob(peaks)), content_type="application/json"
+    )
+
+    note_dicts = [
+        {
+            "start_s": n.start_s,
+            "end_s": n.end_s,
+            "midi": n.midi,
+            "midi_raw": n.midi_raw,
+            "confidence": n.confidence,
+            "syllable_index": n.syllable_index,
+            "word_index": n.word_index,
+            "is_vocable": n.is_vocable,
+        }
+        for n in notes
+    ]
+
+    chart = assemble_chart(
+        duration_s=artifact.get("duration_s") or vocals_stem.duration_s,
+        bpm=artifact.get("bpm"),
+        key_tonic=key_tonic,
+        key_mode=key_mode,
+        key_tonic_from_notes=key_tonic_from_notes,
+        key_mode_from_notes=key_mode_from_notes,
+        key_confidence_from_notes=key_confidence_from_notes,
+        sections=artifact.get("sections", []),
+        beats=beats,
+        downbeats=artifact.get("downbeats", []),
+        words=words,
+        notes=note_dicts,
+        vocable_events=vocable_events,
+        vocals_sha256=vocals_stem.blob_sha256,
+        instrumental_sha256=instrumental_stem.blob_sha256,
+        peaks_sha256=peaks_blob_ref.sha256,
+    )
+    chart_blob_ref = _store_json_blob(blob_store, chart)
+
+    async with session_scope() as db:
+        await record_blob(db, peaks_blob_ref)
+        await record_blob(db, chart_blob_ref)
+
+        analysis_row = await db.execute(
+            select(SongAnalysis).where(SongAnalysis.song_id == song_uuid)
+        )
+        analysis = analysis_row.scalar_one_or_none()
+        if analysis is not None:
+            analysis.chart_blob_sha256 = chart_blob_ref.sha256
+            analysis.peaks_blob_sha256 = peaks_blob_ref.sha256
+            analysis.note_count = len(notes)
+            analysis.key_tonic_from_notes = key_tonic_from_notes
+            analysis.model_versions = {**analysis.model_versions, "note_grid": "derivative-peak-segmentation-v1"}
+
+        ingest_job = await _get_ingest_job(db, song_uuid)
+        if ingest_job is not None:
+            ingest_job.note_grid_status = IngestJobStatus.SUCCEEDED
+            ingest_job.stage_results = {
+                **ingest_job.stage_results,
+                "note_grid": {
+                    "model": "derivative-peak-segmentation-v1",
+                    "note_count": len(notes),
+                },
+            }
+            # Terminal — see this function's docstring.
+            ingest_job.status = IngestJobStatus.SUCCEEDED
+            ingest_job.message = "Karaoke chart ready."
+            ingest_job.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    logger.info(
+        "note_grid.succeeded",
+        song_id=song_id,
+        note_count=len(notes),
+        key_tonic_from_notes=key_tonic_from_notes,
+        key_mode_from_notes=key_mode_from_notes,
+    )
+
+    # T5: fire-and-forget, deferred AFTER status=SUCCEEDED — a CLAP
+    # failure must never fail an ingest job (see run_clap_embedding).
+    await app.configure_task(name=_CLAP_EMBEDDING_TASK_NAME, queue="gpu", lock="gpu:separation").defer_async(
+        song_id=song_id
+    )
+
+
+@app.task(queue="gpu", lock="gpu:separation")
+async def run_clap_embedding(song_id: str) -> None:
+    """Tue Oct 6 (T5): a 512-d CLAP vector per song (elums/ingest/clap.py),
+    deferred fire-and-forget by `run_note_grid` AFTER the ingest job is
+    already `SUCCEEDED`. Deliberately swallows every exception — a CLAP
+    failure must never fail (or re-fail) an ingest job that has already
+    succeeded; this stage is not reflected in `ingest_jobs` at all.
+    """
+    song_uuid = uuid.UUID(song_id)
+
+    async with session_scope() as db:
+        song = await db.get(Song, song_uuid)
+        if song is None:
+            logger.warning("clap_embedding.song_missing", song_id=song_id)
+            return
+        blob_store = LocalBlobStore(settings.blob_root)
+        instrumental_row = await db.execute(
+            select(Stem).where(Stem.song_id == song_uuid, Stem.kind == StemKind.INSTRUMENTAL)
+        )
+        instrumental_stem = instrumental_row.scalar_one_or_none()
+        instrumental_path = (
+            blob_store.local_path(instrumental_stem.blob_sha256) if instrumental_stem else None
+        )
+
+    if instrumental_path is None:
+        logger.warning("clap_embedding.instrumental_missing", song_id=song_id)
+        return
+
+    try:
+        vector = await asyncio.to_thread(embed_audio, str(instrumental_path), settings.model_root)
+    except ClapEmbeddingError as exc:
+        logger.warning("clap_embedding.failed", song_id=song_id, reason=str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001 — log and move on, never raise out of this task
+        logger.warning("clap_embedding.failed", song_id=song_id, reason=str(exc))
+        return
+
+    async with session_scope() as db:
+        stmt = insert(SongEmbedding).values(
+            song_id=song_uuid, embedding=vector.tolist(), model_version="laion/larger_clap_music_and_speech"
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["song_id"],
+            set_={"embedding": vector.tolist(), "model_version": "laion/larger_clap_music_and_speech"},
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+    logger.info("clap_embedding.succeeded", song_id=song_id)

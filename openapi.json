@@ -213,6 +213,107 @@
         "title": "RegisterRequest",
         "type": "object"
       },
+      "SongBundlePublic": {
+        "description": "Tue Oct 6 (T3): `GET /api/songs/{song_id}` \u2014 song metadata plus\nthe chart/peaks/stem blob hashes the karaoke page needs. Deliberately\nNOT the chart's own contents inline \u2014 the client fetches that\nseparately through `/blobs/<chart_blob_sha256>` (Caddy's Range-request\npath), same as every other blob.",
+        "properties": {
+          "artist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artist"
+          },
+          "chart_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chart Blob Sha256"
+          },
+          "f0_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F0 Blob Sha256"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instrumental_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrumental Blob Sha256"
+          },
+          "note_count": {
+            "title": "Note Count",
+            "type": "integer"
+          },
+          "peaks_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peaks Blob Sha256"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/SongVisibility"
+          },
+          "vocals_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vocals Blob Sha256"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "visibility",
+          "vocals_blob_sha256",
+          "instrumental_blob_sha256",
+          "chart_blob_sha256",
+          "peaks_blob_sha256",
+          "f0_blob_sha256",
+          "note_count"
+        ],
+        "title": "SongBundlePublic",
+        "type": "object"
+      },
       "SongPublic": {
         "properties": {
           "artist": {
@@ -522,6 +623,49 @@
           }
         },
         "summary": "Upload Song",
+        "tags": [
+          "songs"
+        ]
+      }
+    },
+    "/api/songs/{song_id}": {
+      "get": {
+        "description": "Tue Oct 6 (T3 of IMPLEMENTATION_PLAN_2026-10-06.md): the karaoke\npage's one fetch \u2014 song metadata plus the chart/peaks/stem blob\nhashes. **Reuses `get_ingest_status`'s owner-or-public rule and\n404-not-403 convention verbatim** (Day 2 \u00a75.3's precedent) rather\nthan reinventing it, per the plan's own instruction.",
+        "operationId": "get_song_bundle_api_songs__song_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "song_id",
+            "required": true,
+            "schema": {
+              "title": "Song Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongBundlePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Song Bundle",
         "tags": [
           "songs"
         ]

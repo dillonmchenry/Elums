@@ -24,6 +24,10 @@ core = [
     # Oct 3 2026; the extra name doesn't exist and uv was silently
     # ignoring it (warning, not error) rather than failing the sync.
     "procrastinate==3.10.0",
+    # Tue Oct 6 (EC-5, T5): song_embeddings' Vector(512) column type.
+    # Core, not gpu-only — api/worker read song_embeddings too (Sunday's
+    # recommender), even though only gpu-worker ever writes a vector.
+    "pgvector==0.4.2",
 ]
 
 # "app" stays torch-free so the api/worker image rebuilds fast on every
@@ -64,6 +68,11 @@ gpu = [
     # transitively, but a module we wrote importing it directly needs its
     # own explicit pin, not a free ride on someone else's dependency.
     "soundfile==0.14.0",
+    # Tue Oct 6 (T1/T3): elums/ingest/f0.py, elums/vendor/rmvpe/model.py,
+    # and elums/ingest/chart.py all `import numpy` directly — already a
+    # transitive pull via librosa/torch, but same explicit-pin convention
+    # as soundfile above.
+    "numpy==2.3.4",
     # Sun Oct 4 (N1, EC-1): structure/beats/downbeats/sections. Pulls in
     # demucs-infer -> torchaudio>=2.0.0, but the cu130 index tops out at
     # torchaudio 2.11.0 while torch is pinned to 2.14.1 (one-wheel
@@ -83,6 +92,10 @@ gpu = [
     # points. Tri-licensed GPL-2.0/LGPL-2.1/MPL-1.1 — shipped under
     # MPL-1.1, recorded in docs/licensing-audit.md.
     "pyphen==0.17.2",
+    # Tue Oct 6 (EC-6): linear probe over WavLM hidden states,
+    # scripts/ssl_layer_probe.py (T7, runs on the VM). Pure sklearn
+    # logistic regression, no new torch/torchaudio pin.
+    "scikit-learn==1.7.2",
 ]
 
 # "dev" is host-side only — pytest hits the real running compose stack
@@ -98,6 +111,10 @@ dev = [
     # if they didn't also need librosa (gpu-only) at module scope — pyphen
     # is pure Python, no GPU/torch dependency, safe in "dev" too.
     "pyphen==0.17.2",
+    # Tue Oct 6 (T2): tests/test_notes.py exercises elums/ingest/notes.py's
+    # deterministic segmentation on synthetic F0 arrays — numpy only, no
+    # torch/librosa, same "deterministic layers only" precedent.
+    "numpy==2.3.4",
     # For tests/test_auth.py's DB-level invariants (no plaintext token at
     # rest, exactly one session row per login, logout deletes the row) —
     # connects to the db:5433 host-port exposed for "ad-hoc psql" in

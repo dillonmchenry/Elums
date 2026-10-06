@@ -49,6 +49,16 @@ Ongoing log of license verification for every third-party model, dataset, and pa
 - Underlying checkpoint: fairseq's wav2vec 2.0 ASR base model, fine-tuned on LibriSpeech 960h — distributed by the torchaudio project itself as part of its pretrained-pipelines surface, under torchaudio's own **BSD-3-Clause** project license (verified via `pytorch/audio` GitHub repo license, Oct 5 2026). No separate NC/restrictive license attaches to pipeline weights distributed this way (distinct from madmom's case, EC-3 of the approach doc's risk register).
 - **Verdict: BSD-3-Clause. Clear to ship.**
 
+### RVC-Project's `infer/rmvpe.py` (RMVPE inference code, vendored)
+
+- **Resolved Tue Oct 6 (T1, EC-1):** there is no PyTorch RMVPE package on PyPI, only the checkpoint (`models/rmvpe.pt`, already on disk since Day 1). Fetched `infer/rmvpe.py` directly from `RVC-Project/Retrieval-based-Voice-Conversion-WebUI`'s GitHub repo (main branch, Oct 6 2026) and vendored a trimmed copy into `elums/vendor/rmvpe/model.py` — the ONNX/DirectML branch, `tools.cuda_graph`, and `configs.config` auto-selection (all RVC-WebUI-specific, none of it load-bearing here) were removed; the DeepUnet/E2E/MelSpectrogram architecture and decode logic are otherwise unchanged.
+- GitHub repo license: **MIT**, copyright liujing04 / 源文雨 / Ftps (2023). Full text copied verbatim into `elums/vendor/rmvpe/LICENSE`.
+- **Verdict: MIT. Clear to ship.**
+
+### `laion/larger_clap_music_and_speech` (CLAP checkpoint)
+
+- Already covered under "Datasets" below for the HuggingFace `gated`/`private` check (Oct 3 2026) — the model repo's own license field has not been independently re-verified beyond that gated/private check; recorded as a gap, not asserted clear. `transformers==5.9.0`'s `ClapModel`/`ClapProcessor` (Apache-2.0, already audited above) is the loading code; no additional package license risk from T5's own work.
+
 ## Datasets
 
 ### `GTSinger/GTSinger`, `smulelabs/NanoPitch-PreExtract`, `laion/larger_clap_music_and_speech`

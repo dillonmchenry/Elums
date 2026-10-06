@@ -90,3 +90,36 @@ hyphenation:
     package: "pyphen==0.17.2"
     license: MPL-1.1  # tri-licensed GPL-2.0/LGPL-2.1/MPL-1.1; MPL-1.1 selected
     resolved_on: 2026-10-05
+
+f0:
+  # Tue Oct 6 (T1, EC-1). No PyTorch RMVPE package on PyPI — only the
+  # checkpoint. Vendored RVC-Project's own inference code
+  # (infer/rmvpe.py) into elums/vendor/rmvpe/model.py instead of
+  # `rmvpe-onnx` (a different checkpoint, CPU-only onnxruntime) — this
+  # keeps F0 on the GPU and uses the already-downloaded/audited weights.
+  rmvpe:
+    checkpoint: "models/rmvpe.pt"
+    checkpoint_sha256_note: "already on disk since Day 1 (Item 4); not re-verified today, see docs/licensing-audit.md"
+    vendored_from: "RVC-Project/Retrieval-based-Voice-Conversion-WebUI, infer/rmvpe.py"
+    fetched_on: 2026-10-06
+    license: MIT  # (c) 2023 liujing04, 源文雨, Ftps — see elums/vendor/rmvpe/LICENSE
+    frame_rate_hz: 100.0  # 16kHz / hop 160
+    note: >
+      Trimmed from upstream: the ONNX/DirectML branch, the
+      tools.cuda_graph wrapper, and configs.config's device/dtype
+      auto-selection — all RVC-WebUI-specific. The DeepUnet/E2E/
+      MelSpectrogram architecture and to_local_average_cents decode are
+      otherwise unchanged, so models/rmvpe.pt's existing state_dict
+      loads against E2E(4, 1, (2, 2)) without modification.
+
+clap:
+  # Tue Oct 6 (T5, EC-4). models/clap-music-speech/ already on disk
+  # (Day 1 Item 4) — loaded via transformers' ClapModel/ClapProcessor.
+  larger_clap_music_and_speech:
+    source: "laion/larger_clap_music_and_speech, via huggingface_hub"
+    path: "${MODEL_ROOT}/clap-music-speech"
+    package: "transformers==5.9.0"
+    sample_rate_hz: 48000
+    embedding_dim: 512  # confirmed against config.json before elums/ingest/clap.py was written
+    license: NOASSERTION  # see docs/licensing-audit.md's dataset section — not yet independently re-verified for the model repo itself
+    resolved_on: 2026-10-06

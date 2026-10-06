@@ -20,6 +20,27 @@ class SongPublic(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SongBundlePublic(BaseModel):
+    """Tue Oct 6 (T3): `GET /api/songs/{song_id}` — song metadata plus
+    the chart/peaks/stem blob hashes the karaoke page needs. Deliberately
+    NOT the chart's own contents inline — the client fetches that
+    separately through `/blobs/<chart_blob_sha256>` (Caddy's Range-request
+    path), same as every other blob.
+    """
+
+    id: uuid.UUID
+    title: str
+    artist: str | None
+    visibility: SongVisibility
+
+    vocals_blob_sha256: str | None
+    instrumental_blob_sha256: str | None
+    chart_blob_sha256: str | None
+    peaks_blob_sha256: str | None
+    f0_blob_sha256: str | None
+    note_count: int
+
+
 class IngestJobPublic(BaseModel):
     """Sun Oct 4 (N4): closes the gap PROGRESS.md's Day 1 loose ends
     flagged — "no HTTP endpoint exists yet for polling an ingest job's

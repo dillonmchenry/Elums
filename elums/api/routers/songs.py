@@ -24,8 +24,10 @@ from elums.ingest.probe import UndecodableAudioError, probe_audio, split_artist_
 from elums.jobs.app import app as procrastinate_app
 from elums.models.ingest_job import IngestJob
 from elums.models.song import Song, SongVisibility
+from elums.models.song_analysis import SongAnalysis
+from elums.models.stem import Stem, StemKind
 from elums.models.user import User
-from elums.schemas.songs import IngestJobPublic, SongPublic
+from elums.schemas.songs import IngestJobPublic, SongBundlePublic, SongPublic
 
 router = APIRouter(prefix="/songs", tags=["songs"])
 
@@ -193,3 +195,56 @@ async def get_ingest_status(
         raise ApiError("not_found", "No ingest job for this song.", status_code=404)
 
     return ingest_job
+
+
+@router.get("/{song_id}", response_model=SongBundlePublic)
+async def get_song_bundle(
+    song_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SongBundlePublic:
+    """Tue Oct 6 (T3 of IMPLEMENTATION_PLAN_2026-10-06.md): the karaoke
+    page's one fetch — song metadata plus the chart/peaks/stem blob
+    hashes. **Reuses `get_ingest_status`'s owner-or-public rule and
+    404-not-403 convention verbatim** (Day 2 §5.3's precedent) rather
+    than reinventing it, per the plan's own instruction.
+    """
+    try:
+        song_uuid = uuid.UUID(song_id)
+    except ValueError as exc:
+        raise ApiError("not_found", "No such song.", status_code=404) from exc
+
+    song = await db.get(Song, song_uuid)
+    if song is None:
+        raise ApiError("not_found", "No such song.", status_code=404)
+
+    if song.visibility is not SongVisibility.PUBLIC:
+        raw_token = request.cookies.get(settings.session_cookie_name)
+        session = await get_session_by_token(db, raw_token) if raw_token else None
+        if session is None or session.user_id != song.uploaded_by_user_id:
+            raise ApiError("not_found", "No such song.", status_code=404)
+
+    stems_result = await db.execute(select(Stem).where(Stem.song_id == song_uuid))
+    stems = {stem.kind: stem for stem in stems_result.scalars()}
+
+    analysis_result = await db.execute(
+        select(SongAnalysis).where(SongAnalysis.song_id == song_uuid)
+    )
+    analysis = analysis_result.scalar_one_or_none()
+
+    return SongBundlePublic(
+        id=song.id,
+        title=song.title,
+        artist=song.artist,
+        visibility=song.visibility,
+        vocals_blob_sha256=(
+            stems[StemKind.VOCALS].blob_sha256 if StemKind.VOCALS in stems else None
+        ),
+        instrumental_blob_sha256=(
+            stems[StemKind.INSTRUMENTAL].blob_sha256 if StemKind.INSTRUMENTAL in stems else None
+        ),
+        chart_blob_sha256=analysis.chart_blob_sha256 if analysis else None,
+        peaks_blob_sha256=analysis.peaks_blob_sha256 if analysis else None,
+        f0_blob_sha256=analysis.f0_blob_sha256 if analysis else None,
+        note_count=analysis.note_count if analysis else 0,
+    )

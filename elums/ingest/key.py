@@ -20,34 +20,17 @@ from dataclasses import dataclass
 import librosa
 import numpy as np
 
-# Krumhansl & Kessler (1990) key profiles, rooted at C. All 24 candidates
-# (12 tonics x 2 modes) are the 12 cyclic rotations of each profile.
-_MAJOR_PROFILE = np.array(
-    [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-)
-_MINOR_PROFILE = np.array(
-    [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
-)
-
-_PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-
-
-def _correlate_all_candidates(chroma_vector: np.ndarray) -> list[tuple[str, str, float]]:
-    """Returns (tonic, mode, correlation) for all 24 candidates, sorted
-    best-first. Pearson correlation, not cosine similarity — KS's own
-    formulation and what makes the "confidence = gap between best and
-    second-best" framing in run_key_estimation meaningful."""
-    candidates: list[tuple[str, str, float]] = []
-    chroma_centered = chroma_vector - chroma_vector.mean()
-    for mode, profile in (("major", _MAJOR_PROFILE), ("minor", _MINOR_PROFILE)):
-        profile_centered = profile - profile.mean()
-        for rotation in range(12):
-            rotated = np.roll(profile_centered, rotation)
-            denom = np.linalg.norm(chroma_centered) * np.linalg.norm(rotated)
-            corr = float(np.dot(chroma_centered, rotated) / denom) if denom > 0 else 0.0
-            candidates.append((_PITCH_CLASSES[rotation], mode, corr))
-    candidates.sort(key=lambda c: c[2], reverse=True)
-    return candidates
+# Tue Oct 6: the profile constants and the pure correlation function now
+# live in elums/ingest/key_profiles.py (no librosa import there) so
+# elums/ingest/notes.py's T2 note-histogram cross-check can reuse them
+# without pulling librosa into the host `dev` test environment. Re-bound
+# to the original private names here so this module's own call site
+# (estimate_key, below) and existing tests/test_structure.py imports
+# (`from elums.ingest.key import _correlate_all_candidates`,
+# `_MAJOR_PROFILE`) keep working unchanged.
+from elums.ingest.key_profiles import MAJOR_PROFILE as _MAJOR_PROFILE
+from elums.ingest.key_profiles import PITCH_CLASSES as _PITCH_CLASSES
+from elums.ingest.key_profiles import correlate_all_candidates as _correlate_all_candidates
 
 
 @dataclass(frozen=True)

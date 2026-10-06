@@ -71,3 +71,26 @@ class SongAnalysis(TimestampMixin, Base):
     # AI/cost ledger (ELUMS_BUILD_SCHEDULE.md) is a query over this and
     # ingest_jobs.stage_results together, not a separate archaeology pass.
     model_versions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Tue Oct 6 (T1/T3 of IMPLEMENTATION_PLAN_2026-10-06.md): the F0 track
+    # is its OWN binary float16 blob (§4's tiering rule — not JSON, not
+    # merged into analysis_blob_sha256 above), and the chart/peaks are the
+    # client-facing bundle, a second artifact entirely from the internal
+    # analysis blob. Nullable until each respective stage runs.
+    f0_blob_sha256: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("blobs.sha256"), nullable=True
+    )
+    frame_rate_hz: Mapped[float | None] = mapped_column(Float, nullable=True)
+    voiced_frame_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    chart_blob_sha256: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("blobs.sha256"), nullable=True
+    )
+    peaks_blob_sha256: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("blobs.sha256"), nullable=True
+    )
+    note_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # T2's note-histogram cross-check (§5) — deliberately NOT overwriting
+    # key_tonic/key_mode above; the owner judges which one wins (M1 gate).
+    key_tonic_from_notes: Mapped[str | None] = mapped_column(String(2), nullable=True)

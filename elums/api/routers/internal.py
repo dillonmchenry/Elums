@@ -47,10 +47,13 @@ async def blob_authz(request: Request, db: AsyncSession = Depends(get_db)) -> Re
     sha256 = match.group("sha256")
 
     # A blob is "reachable" either as a song's own source upload, as one
-    # of that song's separated stems (M8), or (N4, Oct 4) as that song's
-    # structure/key/VAD analysis artifact — all three grant the same
-    # access as the owning song, since each is derived from and inherits
-    # the visibility of its song, not a separate permission of its own.
+    # of that song's separated stems (M8), as that song's
+    # structure/key/VAD/lyrics analysis artifact (N4, Oct 4), or — Tue
+    # Oct 6 (T3) — as that song's f0, peaks, or chart blob. All grant the
+    # same access as the owning song, since each is derived from and
+    # inherits the visibility of its song, not a separate permission of
+    # its own. This has bitten twice already (stems, then analysis) —
+    # every new blob kind needs a join added here, by design.
     direct = await db.execute(select(Song).where(Song.source_blob_sha256 == sha256))
     via_stem = await db.execute(
         select(Song).join(Stem, Stem.song_id == Song.id).where(Stem.blob_sha256 == sha256)
@@ -60,10 +63,32 @@ async def blob_authz(request: Request, db: AsyncSession = Depends(get_db)) -> Re
         .join(SongAnalysis, SongAnalysis.song_id == Song.id)
         .where(SongAnalysis.analysis_blob_sha256 == sha256)
     )
+    via_f0 = await db.execute(
+        select(Song)
+        .join(SongAnalysis, SongAnalysis.song_id == Song.id)
+        .where(SongAnalysis.f0_blob_sha256 == sha256)
+    )
+    via_chart = await db.execute(
+        select(Song)
+        .join(SongAnalysis, SongAnalysis.song_id == Song.id)
+        .where(SongAnalysis.chart_blob_sha256 == sha256)
+    )
+    via_peaks = await db.execute(
+        select(Song)
+        .join(SongAnalysis, SongAnalysis.song_id == Song.id)
+        .where(SongAnalysis.peaks_blob_sha256 == sha256)
+    )
     songs = list(
         {
             song.id: song
-            for song in (*direct.scalars(), *via_stem.scalars(), *via_analysis.scalars())
+            for song in (
+                *direct.scalars(),
+                *via_stem.scalars(),
+                *via_analysis.scalars(),
+                *via_f0.scalars(),
+                *via_chart.scalars(),
+                *via_peaks.scalars(),
+            )
         }.values()
     )
     if not songs:
