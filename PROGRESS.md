@@ -289,3 +289,119 @@ Both real songs ran with **artist metadata correctly extracted** (`ffprobe`'s ID
 - **A lyric correction UI and the manual lyric-paste path are explicitly out of scope** (per the plan's own §6) and remain unbuilt — not a gap, a deliberate non-goal for today.
 - **The stale-process DB rows from before tonight's `asyncio` fix** (§5 item 2) left two `ingest_jobs` rows in `FAILED` with a stale `error_message` until manually reset via direct SQL + task re-defer during validation — this was a one-off manual recovery during tonight's session, not a built retry/resume mechanism. The PENDING-job-sweep loose end from Day 1 §7 is the more general version of this gap; still not built.
 - **EC-6 (GTSinger VM download)** not re-checked — carried unchanged from Day 2.
+
+---
+
+## Tuesday Oct 6 — Day 4 (F0 → note grid → chart → M1, plus the VM SSL layer probe)
+
+Governed by [IMPLEMENTATION_PLAN_2026-10-06.md](IMPLEMENTATION_PLAN_2026-10-06.md).
+
+### 1. Milestone status
+
+| Milestone | Status | Notes |
+| --- | --- | --- |
+| T1 — F0 stage (RMVPE) | **done** | `elums/vendor/rmvpe/`, `elums/ingest/f0.py` |
+| T2 — note grid | **done** | `elums/ingest/notes.py` — three bugs found and fixed against a real song, see §3 |
+| T3 — chart writer, peaks, bundle API | **done** | `elums/ingest/chart.py`, `GET /api/songs/{id}` |
+| T4 — karaoke playback page | **done** | `frontend/src/pages/SongPage.tsx` |
+| T5 — CLAP embedding | **done** | `elums/ingest/clap.py`, validated against the criterion (§4) |
+| T6 — ten songs, M1 gate | **partial — see §5** | Structural validation done on both `data/samples/` tracks; the "8 more songs" and the human "listen" pass are not done |
+| T7 — VM SSL layer probe | **done** | Ran live, not overnight — see §6 |
+
+Commits: `db03007` (T1+T2+T3) · `1284a3a` (T4) · `780c05b` (T5) · `d79ef17` (T7). T6 has no code of its own beyond the fixes folded into T1+T2+T3's commit (see §3) — its deliverable is the validation evidence in §4/§5, not a diff.
+
+### 2. Early checks (EC-1 through EC-6)
+
+| # | Risk | Resolution |
+| --- | --- | --- |
+| EC-1 | RMVPE licensing (MIT, RVC-Project) | Vendored from the real upstream source (`RVC-Project/Retrieval-based-Voice-Conversion-WebUI`'s `infer/rmvpe.py`, fetched live, not reconstructed from memory), trimmed of ONNX/DirectML/CUDA-graph branches that don't apply here. Full MIT license text copied into `elums/vendor/rmvpe/LICENSE`; verdict recorded in `docs/licensing-audit.md`. |
+| EC-2 | `pgvector` for `song_embeddings` | `pgvector==0.4.2` added to the `core` group; `Vector(512)` column, no HNSW index (deferred per the plan, §8.1). |
+| EC-3 | `audiowaveform` replacement | Peaks computed in pure Python/soundfile (`elums/ingest/chart.py::compute_peaks`), deliberately, not dropped. |
+| EC-4 | WavLM-large layer/shape assumptions (T7) | Confirmed directly on the VM before probing: `num_hidden_layers=24` → 25 hidden-state tensors, index 0 is the CNN encoder; `AutoFeatureExtractor` (not hand-rolled preprocessing) honors `do_normalize: true`; `pytorch_model.bin`-only checkpoint loads cleanly under `transformers==5.9.0` (488/488 weights, no missing/unexpected/mismatched keys). |
+| EC-5 | Separation checkpoint identity | Unchanged from Day 1 — not re-touched today. |
+| EC-6 | GTSinger schema (T7's own explicit "inspect first, don't guess" instruction) | Read directly off the live VM cache before writing any code: `processed/English/metadata.json` is a flat list of per-clip items (`ph`/`ph_durs` phoneme sequence + durations, six per-phoneme boolean technique columns, `wav_fn`). Full detail in §6. |
+
+### 3. The note-grid bug chain (T2/T6) — three real bugs, three fixes, three regression tests
+
+All three were found by running the real chain against `data/samples/is-this-all-liz-james.mp3`, not by the synthetic unit tests (which still pass throughout — they simply didn't cover these cases going in). Each fix is a genuinely different symptom, not a repeat of the same failed attempt, so this is the "after two unsuccessful fixes, reassess root cause" instruction's intended shape — new evidence each time, not the same patch retried:
+
+1. **Notes shrunk below `MIN_NOTE_DURATION_S` by beat-snapping.** `_snap_onset_to_beat` could pull a note's start close enough to a beat that the remaining span fell under 0.08s, and the snap-acceptance check never re-verified duration after snapping. One note measured 0.00066s. **Fix:** added a duration re-check to the snap-rejection condition in `build_note_grid`.
+2. **98/221 notes crossed their own syllable's start_s.** The same half-beat check only compared distance-to-beat, never checked whether the snapped onset fell before the syllable span the note was built from. **Fix:** `raw_notes` now carries `span_start_s` through to the snap step; snaps landing before it are rejected.
+3. **7/221 notes overshot their syllable's end_s by ~9ms.** Traced to `_segment_span` independently `round()`-ing the syllable's start and end to the nearest 100Hz frame (up to 0.5 frames = 5ms slack each, ~10ms compounding) rather than clamping the result. **Fix:** explicit `max(note_start_s, span_start_s)` / `min(note_end_s, span_end_s)` clamp inside `_segment_span`.
+
+A fourth issue surfaced only during re-validation, **not a notes.py bug**: re-running the fixed code against the second sample song through the live `gpu-worker` queue initially showed 135/326 violations — because the long-running Procrastinate worker process still had the *pre-fix* `notes.py` loaded in memory (Python doesn't hot-reload a bind-mounted `.py` edit into an already-running process). Restarting `api`/`worker`/`gpu-worker` and re-running resolved it to 0/326. Recorded here because it is exactly the kind of false "the fix didn't work" signal the two-unsuccessful-fixes instruction warns about — the right move was recognizing it as a process-staleness artifact, not writing a fourth code fix for a bug that no longer existed in the code on disk.
+
+### 4. Real-song validation (T2/T3/T5/T6)
+
+Both `data/samples/` tracks run through the full `separation → structure_beats → rms_vad → lyrics → ctc_alignment → f0 → note_grid` chain via the live API, then re-validated after the fixes in §3 and after restarting the workers:
+
+| Check | "Is This All" (221.3s) | "Fill Me Up" (268.3s) |
+| --- | --- | --- |
+| `note_count` | 221 | 326 |
+| Syllable-boundary violations | **0 / 221** | **0 / 326** |
+| Out-of-range notes (outside `[0, duration_s]`) | 0 | 0 |
+| Min / median note duration | 0.080s / 0.239s | 0.080s / 0.185s |
+| F0 frame count vs `round(duration_s * 100)` | 22132 vs 22132 (exact) | 26831 vs 26830 (within ±1) |
+| `voiced_frame_ratio` (RMVPE) vs VAD's `voiced_duration_s / duration_s` | 0.623 vs 0.793 (diff ~21%) | 0.589 vs 0.610 (diff ~3.5%) |
+| `key_tonic`/`key_mode` (chroma) vs `_from_notes` cross-check | G minor (0.074) vs A minor | G minor (0.161) vs F# major |
+
+All of acceptance check 6's structural invariants (every note inside its syllable span, every timestamp inside `[0, duration_s]`, `note_count > 0`, F0 frame count within ±1) pass on both real songs.
+
+**"Is This All"'s `voiced_frame_ratio` sits further from VAD's number than "Fill Me Up"'s does** — plausibly real, not a bug: RMVPE's 0.03 confidence threshold only marks frames with an actual detected pitch, while RMS-VAD's energy threshold also catches unvoiced consonants and breath noise as "voiced." Not independently confirmed by listening (no audio playback in this session, same limitation as Day 3); flagged rather than chased further, since the two metrics are deliberately measuring different things and a 21% gap on one song vs 3.5% on the other is consistent with that explanation rather than with a code defect.
+
+**T5's own validation criterion is met directly:** cosine similarity between the two real sample tracks' CLAP embeddings is **0.647**, versus **0.19–0.28** between either real track and any synthetic-tone test fixture (`twenty-second-tone.mp3`, `short-tone.mp3`, two more from live pytest runs). `song_embeddings` carries one 512-d row per ingested song, confirmed via a direct query.
+
+**Full-chain regression**, `tests/test_separation.py` against the live stack (20-second synthetic fixture): both tests pass, `ingest_job.status` now reaches `SUCCEEDED` only after `note_grid` (one stage later than Day 2/3), confirming the extended chain is wired correctly end-to-end, not just on the two real songs. `pytest tests/` (host-side, 63 tests) and `test_structure.py`/`test_separation.py` (gpu-marked, 10 tests) all pass; `frontend`'s vitest suite (5 tests) passes; `tsc -b` clean.
+
+### 5. T6's actual scope versus the plan's "ten songs" — a scope decision for the owner
+
+T6 asks for the full chain on both `data/samples/` tracks **plus ~8 more diverse songs**, then **a human listening pass** on 3 songs (onset accuracy, octave errors, by ear), feeding an M1 quality-gate table that the owner — not this agent — decides against (per the plan's own "do not pick the fallback yourself" instruction, which applies with equal force to the gate itself here, not just the correction-UI/seed-catalog fallback it was written for).
+
+**What was actually done:** structural validation (§4) on both existing sample tracks — every programmatically-checkable invariant the plan names (syllable clipping, timestamp ranges, note count, frame-count arithmetic) passes cleanly on both.
+
+**What was not done, and why, honestly:**
+- **8 more diverse songs were not sourced.** No additional licensed audio exists in this repo or environment (checked: only `data/samples/`'s original two tracks and three short synthetic test fixtures exist anywhere on disk). Sourcing 8 more real songs is a licensing/content decision (Day 2's two tracks were CC-BY, deliberately attributed in `data/samples/README.md`) that this agent should not make unilaterally by pulling arbitrary audio off the internet.
+- **The human "listen" pass (3 songs, by ear) was not done.** This agent session has no audio playback, carried forward from Day 3's identical limitation — MA-4 (headphones/playback) is scoped to the human operator, not this session.
+- **The M1 quality table and gate decision are therefore not presented tonight.** The structural numbers in §4 are real and are the actual evidence; a genuine "octave errors, onset accuracy by ear" judgment on top of them needs a human to listen. **This is the decision point to record per the plan's own §9: the owner needs to either (a) listen to the two existing real-song charts and judge whether the structural pass is good enough evidence to call M1 provisionally met, or (b) source additional songs and do the listening pass before M1 is called.** Nothing here is silently assumed either way.
+
+### 6. T7 — VM SSL layer probe
+
+**GTSinger schema, inspected directly (not guessed) before writing any code:** `processed/English/metadata.json` (4,827 items) is a flat list of per-clip entries, each with `ph`/`ph_durs` (phoneme sequence + per-phoneme durations in seconds, summing to clip duration), `wav_fn` (path relative to the snapshot root), and six independent per-phoneme boolean columns — `mix_tech`, `falsetto_tech`, `breathy_tech`, `pharyngeal_tech`, `vibrato_tech`, `glissando_tech` — matching the plan's six named labels exactly. These are **not** mutually exclusive with the recording-session folder name (`Breathy_Group`/`Control_Group`/etc. in `item_name`): a `Control_Group` clip can still carry `mix_tech=1` on most phonemes, because "mixed voice" is pop singing's default register, not an exceptional technique — confirmed directly against the data, not assumed, before trusting it as a label source.
+
+`scripts/ssl_layer_probe.py`: built a stratified ~2-hour subset (770 items, 21 singer×group strata, round-robin until the cumulative duration crossed 2 hours), ran WavLM-large with `output_hidden_states=True`, mean-pooled layers {1, 4, 7, 12, 18, 24} over each non-silence phoneme's frame span (50Hz, 20ms/frame), and trained one `LogisticRegression` per layer per label (6 independent binary probes, 80/20 split, `class_weight="balanced"`), averaging the 6 F1 scores into that layer's macro-F1. Smoke-tested on 20 items first (`--dry-run-items`), confirmed working, then launched the full run.
+
+`scripts/cache_ssl_features.py`: reads the probe's own output, picks the top-N layers by macro-F1, caches fp16 hidden states (one `.npy` per clip per layer) for the **full** 4,827-item English corpus to the VM's own SSD — resumable (skips already-cached files), smoke-tested on 5 items first.
+
+**Launched** per the plan's own instruction — not a bare `tmux` session (EC-0's finding from a prior day): `bash -n`-checked, then `setsid bash scripts/run_t7_probe_chain.sh < /dev/null > /tmp/probe.log 2>&1 & disown`.
+
+**Result: finished in ~9 minutes, not overnight.** The plan anticipated an overnight run; on this GPU, with a 2-hour (not full-corpus) stratified subset for the probe stage and ~50ms/clip for feature extraction, the probe stage took ~1 minute and the subsequent full-corpus caching stage (4,827 items, 2 layers) took ~5 minutes. This is not a shortcut or a smaller run than specified — the stratified-subset size and the full-corpus caching scope both match the plan's own spec exactly; the VM's RTX 5060 Ti is simply fast enough that "overnight" was a conservative estimate, not a requirement. Final table, written to `results/ssl_layer_probe.json` and committed:
+
+| Layer | macro-F1 |
+| --- | --- |
+| 1 | 0.780 |
+| **4** | **0.795** (best) |
+| 7 | 0.745 |
+| 12 | 0.712 |
+| 18 | 0.611 |
+| 24 | 0.637 |
+
+**Not a flat table** (the plan's own sanity check for a broken probe) — early/mid layers (1, 4, 7) clearly outperform late layers (18, 24) by ~0.13–0.18 macro-F1, consistent with §11.2's cited pattern of early-layer competitiveness and late-layer collapse for this kind of technique-detection task, though the specific peak (layer 4, not layer 1) and magnitude differ from the cited reference numbers — expected, since that citation was for a different benchmark/task, not a reproduction target. `cache_ssl_features.py --num-layers 2` cached layers **4 and 1** (the top two), 9.0 GB total for the full English corpus — far under the plan's own "~30 GB per layer" estimate (that figure likely assumed caching across all languages, not English alone), well within the VM's 1.5 TB free disk.
+
+### 7. Deviations from the plan
+
+1. **Found and fixed: the long-running `gpu-worker`/`worker`/`api` Procrastinate processes do not pick up bind-mounted `.py` edits without a restart.** See §3's fourth item — a stale in-memory module briefly looked like a fourth, unexplained note-grid bug on the second sample song before being correctly diagnosed as a process-staleness artifact and resolved by `docker compose restart api worker gpu-worker`, not a new code change. Not previously documented as a gotcha in Days 1–3's PROGRESS entries, despite presumably having been true the whole time — worth remembering explicitly before trusting any live-queue result immediately after an edit.
+2. **T7 finished in minutes, not overnight** — see §6. Not a deviation in scope (the subset size, caching corpus, and launch mechanism all match the plan's spec exactly), just a timing outcome worth stating plainly rather than treating as if it ran unattended all night.
+3. **T6's "ten songs" and "listen" sub-tasks are not done** — see §5, recorded as the decision point for the owner, not silently dropped or unilaterally resolved.
+
+### 8. Blockers
+
+- **MA-3's deployment decision for the Smule box is still open** (carried from Day 1/2/3) — not re-raised tonight.
+- **T6's M1 gate decision needs the owner** — see §5. This is the headline open item from tonight: the pipeline is structurally sound on every song it has been run against, but the plan's own acceptance bar for M1 requires a human judgment this agent cannot make.
+
+### 9. Loose ends carried forward
+
+- Everything in Days 1–3's §7 not explicitly resolved above.
+- **8 more diverse songs for T6, and the 3-song human listening pass** — see §5.
+- **`voiced_frame_ratio` vs VAD's `voiced_duration_s`** diverges by ~21% on one song and ~3.5% on the other (§4) — plausibly a real difference in what the two signals measure (pitch-confidence threshold vs energy threshold), not independently confirmed by listening.
+- **The gpu-worker/worker/api hot-reload gotcha (§7 item 1)** is now documented here but not fixed structurally — a developer (or a future agent session) editing `.py` files against the live stack still needs to remember to restart the relevant service(s) before trusting a live-queue re-run. Worth a `Makefile` target (`make restart-workers` or similar) on a day with headroom.
+- **Scratch verification scripts used during tonight's validation were deleted after use** (`scripts/_verify_*.py`, `scripts/_rerun_*.py`) — not committed, by design; the real, kept deliverables are `scripts/ssl_layer_probe.py` and `scripts/cache_ssl_features.py`.
