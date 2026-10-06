@@ -14,7 +14,8 @@
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.4",
+    "wavesurfer.js": "^8.0.1"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.99.0",

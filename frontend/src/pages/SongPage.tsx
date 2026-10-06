@@ -1,0 +1,202 @@
+import { useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
+import WaveSurfer from "wavesurfer.js";
+import { getSongBundleApiSongsSongIdGet } from "../client";
+import type { SongBundlePublic } from "../client";
+
+// Tue Oct 6 (T4 of IMPLEMENTATION_PLAN_2026-10-06.md): the karaoke
+// playback page — press play, hear the instrumental, watch lyrics scroll
+// in time, see the note grid as a static lane. This is the "playable
+// chart" half of M1; the 60fps Canvas pitch lane with a live performance
+// overlay is Wednesday's work, not an extension of this scaffolding.
+
+type ChartSyllable = { text: string; start_s: number; end_s: number };
+type ChartWord = { text: string; start_s: number; end_s: number; syllables: ChartSyllable[] };
+type ChartNote = {
+  start_s: number;
+  end_s: number;
+  midi: number;
+  midi_raw: number;
+  confidence: number;
+  is_vocable: boolean;
+};
+type Chart = {
+  duration_s: number;
+  bpm: number | null;
+  words: ChartWord[];
+  notes: ChartNote[];
+};
+type Peaks = { buckets: number; min: number[]; max: number[] };
+
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; bundle: SongBundlePublic; chart: Chart; peaks: Peaks | null };
+
+const NOTE_LANE_HEIGHT = 120;
+const MIDI_RANGE = 24; // ±2 octaves around the note grid's own median, drawn once per song
+
+async function fetchBlobJson<T>(sha256: string): Promise<T> {
+  const res = await fetch(`/blobs/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}`);
+  if (!res.ok) throw new Error(`blob fetch failed: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+function NoteLane({ chart, width }: { chart: Chart; width: number }) {
+  // Static SVG lane, laid out once from the chart — not a 60fps canvas
+  // (that is Wednesday's work per the plan's own instruction). This is
+  // scaffolding to make a bad note grid visible at a glance during T6.
+  const notes = chart.notes;
+  if (notes.length === 0) {
+    return <p data-testid="note-lane-empty">No notes in this chart.</p>;
+  }
+  const midiValues = notes.map((n) => n.midi);
+  const centerMidi = midiValues.sort((a, b) => a - b)[Math.floor(midiValues.length / 2)];
+  const minMidi = centerMidi - MIDI_RANGE / 2;
+  const duration = chart.duration_s || 1;
+
+  const xFor = (t: number) => (t / duration) * width;
+  const yFor = (midi: number) =>
+    NOTE_LANE_HEIGHT - ((midi - minMidi) / MIDI_RANGE) * NOTE_LANE_HEIGHT;
+
+  return (
+    <svg
+      data-testid="note-lane"
+      width={width}
+      height={NOTE_LANE_HEIGHT}
+      viewBox={`0 0 ${width} ${NOTE_LANE_HEIGHT}`}
+      role="img"
+      aria-label="Note grid"
+    >
+      {notes.map((note, i) => (
+        <rect
+          key={i}
+          x={xFor(note.start_s)}
+          y={yFor(note.midi) - 2}
+          width={Math.max(1, xFor(note.end_s) - xFor(note.start_s))}
+          height={4}
+          fill={note.is_vocable ? "#999" : "#2d6cdf"}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function LyricsView({ chart, currentTimeS }: { chart: Chart; currentTimeS: number }) {
+  // Active-syllable highlight driven by the media element's currentTime
+  // in a requestAnimationFrame loop (see SongPage's effect below) — never
+  // re-rendering the whole word list on every animation frame, just the
+  // highlighted index, since React's own diffing handles the rest cheaply
+  // enough at this word count (tens to low hundreds per song).
+  return (
+    <p data-testid="lyrics-view">
+      {chart.words.map((word, wi) => (
+        <span key={wi}>
+          {word.syllables.map((syl, si) => {
+            const active = currentTimeS >= syl.start_s && currentTimeS < syl.end_s;
+            return (
+              <span
+                key={si}
+                data-testid="syllable"
+                style={active ? { fontWeight: "bold", textDecoration: "underline" } : undefined}
+              >
+                {syl.text.toLowerCase()}
+              </span>
+            );
+          })}{" "}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+export function SongPage() {
+  const { id } = useParams<{ id: string }>();
+  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [currentTimeS, setCurrentTimeS] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const waveSurferRef = useRef<WaveSurfer | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await getSongBundleApiSongsSongIdGet({ path: { song_id: id } });
+      if (error || !data) {
+        if (!cancelled) setState({ kind: "error", message: "Song not found or not ready yet." });
+        return;
+      }
+      if (!data.chart_blob_sha256 || !data.instrumental_blob_sha256) {
+        if (!cancelled) setState({ kind: "error", message: "Ingest hasn't produced a chart yet." });
+        return;
+      }
+      try {
+        const chart = await fetchBlobJson<Chart>(data.chart_blob_sha256);
+        const peaks = data.peaks_blob_sha256 ? await fetchBlobJson<Peaks>(data.peaks_blob_sha256) : null;
+        if (!cancelled) setState({ kind: "ready", bundle: data, chart, peaks });
+      } catch (err) {
+        if (!cancelled) setState({ kind: "error", message: String(err) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (state.kind !== "ready" || !containerRef.current) return;
+
+    // Interleaved min/max per bucket, flattened into one channel array —
+    // EC-3's resolution: Python-computed peaks stand in for
+    // `audiowaveform`'s own JSON format, which wavesurfer's `peaks`
+    // option accepts the same way (one flat per-channel amplitude array).
+    const peaksChannel = state.peaks
+      ? Float32Array.from(state.peaks.min.flatMap((min, i) => [min, state.peaks!.max[i]]))
+      : undefined;
+
+    const ws = WaveSurfer.create({
+      container: containerRef.current,
+      url: `/blobs/${state.bundle.instrumental_blob_sha256!.slice(0, 2)}/${state.bundle.instrumental_blob_sha256!.slice(2, 4)}/${state.bundle.instrumental_blob_sha256}`,
+      peaks: peaksChannel ? [peaksChannel] : undefined,
+      duration: state.chart.duration_s,
+      waveColor: "#9bb8e8",
+      progressColor: "#2d6cdf",
+      height: 80,
+    });
+    waveSurferRef.current = ws;
+
+    const tick = () => {
+      setCurrentTimeS(ws.getCurrentTime());
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      ws.destroy();
+      waveSurferRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind === "ready" ? state.bundle.id : null]);
+
+  if (state.kind === "loading") return <p>Loading…</p>;
+  if (state.kind === "error") return <p role="alert">{state.message}</p>;
+
+  return (
+    <main>
+      <h1>{state.bundle.title}</h1>
+      {state.bundle.artist && <p>{state.bundle.artist}</p>}
+
+      <div ref={containerRef} data-testid="waveform" />
+      <button type="button" onClick={() => waveSurferRef.current?.playPause()}>
+        Play / pause
+      </button>
+
+      <NoteLane chart={state.chart} width={800} />
+      <LyricsView chart={state.chart} currentTimeS={currentTimeS} />
+    </main>
+  );
+}

@@ -146,6 +146,13 @@ export function HomePage() {
           {job.message && <p>{job.message}</p>}
           {job.error_message && <p role="alert">{job.error_message}</p>}
           <StageStatus job={job} />
+          {/* Tue Oct 6 (T4): once the chain succeeds, link straight to the
+              karaoke page — the progress UI's own job is done at that point. */}
+          {job.status === "succeeded" && songId && (
+            <p>
+              <Link to={`/songs/${songId}`}>Play song</Link>
+            </p>
+          )}
         </section>
       )}
     </main>
