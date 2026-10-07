@@ -19,8 +19,8 @@ Companion to [ELUMS_TECHNICAL_APPROACH.md](ELUMS_TECHNICAL_APPROACH.md); section
 | Thu Oct 8 | 8 | Local, VM overnight | Mobile + real-time audio (iOS, NanoPitch WASM, AEC) | **M3 — works on a real iPhone** | [ ] |
 | Fri Oct 9 | 8 | Local, VM training | Coaching engine (6h) + progress tracking (2h) | **M4 — coaching cards with click-to-hear** | [ ] |
 | Sat Oct 10 | 8 | Local | Live duet (6h) + challenges (2h) | **M5 — two-device duet artifact** | [ ] |
-| Sun Oct 11 | 8 | Local + VM deploy | Recommendations + sharing (5h), **VM rehearsal (1.5h)**, buffer + prep (1.5h) | **M6 — the loop closes, running on the VM** | [ ] |
-| Mon Oct 12 | 2 | VM | Finalize submission | Shipped | [ ] |
+| Sun Oct 11 | 8 | Local | Recommendations + sharing (5h), **deliverable hardening (1.5h)**, buffer + prep (1.5h) | **M6 — the loop closes** | [ ] |
+| Mon Oct 12 | 2 | Local + clean-room check | Finalize submission | Shipped | [ ] |
 
 **Three structural decisions behind this shape.** The 4-hour weekday blocks get ingest, because ingest decomposes cleanly into independent stages that each fit a half-day and do not require long debugging runs. The three days off work get the three things that *do* need uninterrupted blocks: mobile audio, the coaching engine, and the duet session. And Depth Bet 3 is split across the back three days as a second track rather than given its own day, which is what buys the Sunday buffer.
 
@@ -28,7 +28,20 @@ Companion to [ELUMS_TECHNICAL_APPROACH.md](ELUMS_TECHNICAL_APPROACH.md); section
 
 ## Local-first, VM for scale
 
-**Build locally. Bring the VM in for the three things it is uniquely good at.** The local GPU (8–12 GB) runs everything the product needs at development scale — separation ~7 GB, Whisper large-v3-turbo ~3–5 GB, RMVPE 362 MB, WhisperX, CLAP — and the pipeline serializes the heavyweights anyway, because even the VM's 16 GB cannot hold separation and ASR at once (§12.3).
+**Build locally. Bring the VM in for the three things it is uniquely good at.** The local GPU has far more headroom than this document originally estimated. Measured peaks across the 8-song validation run (`results/sample_song_quality.json`), all on the 8 GB RTX 3070:
+
+| Stage | Peak VRAM |
+| --- | --- |
+| `f0` (RMVPE) — **the pipeline's largest** | 2.0 GB |
+| `separation` (Mel-Band RoFormer) | 1.8 GB |
+| `lyrics` (Whisper large-v3-turbo) | 1.6 GB |
+| `structure_beats` (all-in-one's own HTDemucs) | 1.2 GB |
+| `ctc_alignment` (wav2vec2) | 0.7 GB |
+| `rms_vad`, `note_grid` | CPU-only |
+
+Three corrections to what this line used to say. **Separation was estimated at ~7 GB and measures 1.8 GB** — because the pipeline runs `segment_size=128`, half audio-separator's own mdxc default of 256 (`elums/separation/engine.py`), and halves again on OOM down to a floor of 32, so a smaller card degrades rather than fails. **RMVPE was listed as "362 MB,"** which is its checkpoint size, not its VRAM footprint; it is in fact the heaviest stage. And **WhisperX is not used at all** — `transformers` loads the HF checkpoint directly (PROGRESS Day 3 EC-1).
+
+The pipeline still serializes the heavyweights under Procrastinate's `lock="gpu:separation"` — **not** because memory cannot hold two at once, which it comfortably can, but because there is one CUDA context and concurrent jobs contend for the same SMs with no throughput gain (§11.6).
 
 What the VM is actually for:
 
@@ -37,19 +50,20 @@ What the VM is actually for:
 | The 1.5 TB SSD — GTSinger at 54 GB, cached SSL features at ~30 GB per layer | Tue night |
 | Unattended overnight runs that do not tie up the dev machine | Tue night |
 | Bulk catalog ingest while you work on something else | Sat / Sun |
-| **The deployment target** — Smule deploys this internally | Sun |
 
-Walking the schedule, you are genuinely unblocked until **Tuesday night**, and the only hard requirement is the deployment rehearsal at the end. Wednesday and Thursday are local by physics: `getUserMedia`, AudioWorklet, the WASM AEC, MLS calibration, and iOS testing all need a real browser on a real device with a real microphone, which a headless box cannot provide at any point in the project.
+> **Corrected Oct 6, evening — the VM is not the deployment target, and never was.** The brief states the delivery mode plainly: *"you will deliver the source code to us, and we will deploy the application internally."* What ships is a repository, not a running host. The VM is training and bulk-compute capacity only; the deployment row that used to sit in this table was a misreading. See [PROGRESS.md](PROGRESS.md) Day 4 §11.
 
-**Dev topology is not deployed topology.** The finished system puts everything except the client on the VM — Caddy, API, both workers, Postgres, Valkey, blobs, every model, and the *built* frontend as static assets. Your local machine is scaffolding and ships nothing. The browser keeps a real compute tier by design, not by limitation: NanoPitch WASM for live pitch, the known-reference AEC in an AudioWorklet, the Canvas pitch lane, local full-quality recording, and latency calibration.
+Walking the schedule, you are genuinely unblocked until **Tuesday night**, and with deployment off the VM there is no hard VM requirement anywhere on this schedule. Wednesday and Thursday are local by physics: `getUserMedia`, AudioWorklet, the WASM AEC, MLS calibration, and iOS testing all need a real browser on a real device with a real microphone, which a headless box cannot provide at any point in the project.
+
+**Dev topology is not deployed topology.** The deployed topology is whatever Smule stands up from the repo — Caddy, API, both workers, Postgres, Valkey, blobs, every model, and the *built* frontend as static assets, from one command on their hardware. Neither your local machine nor the VM ships anything: **what ships is the clean clone.** That makes one-command bootstrap the deliverable itself rather than a nicety, and it is the single thing most worth protecting from here on. The browser keeps a real compute tier by design, not by limitation: NanoPitch WASM for live pitch, the known-reference AEC in an AudioWorklet, the Canvas pitch lane, local full-quality recording, and latency calibration.
 
 ### Portability disciplines — hold these from the first commit
 
-The transition to the VM costs near-zero **if** these hold, and most of a day if they do not. Budget one hour on Saturday.
+These were written for the transition to the VM; they matter more now that the real target is **Smule's own Linux host, running the repo unattended**. Every one of them is a thing that works on Windows and fails on Linux, with nobody there to debug it. Budget one hour on Saturday.
 
 - [ ] **Dockerize from commit one**, and exercise the containers at least once a day even if you normally run with `uv run` for speed. The failure mode is "works in my venv, no container exists"
 - [ ] **No absolute Windows paths, ever.** `pathlib` everywhere, roots from env vars. This is the most common breakage by a wide margin
-- [ ] **Case-sensitivity discipline.** Windows is case-insensitive, Linux is not — `import Foo` resolving to `foo.py` works locally and dies on the VM
+- [ ] **Case-sensitivity discipline.** Windows is case-insensitive, Linux is not — `import Foo` resolving to `foo.py` works locally and dies on any Linux host, including Smule's
 - [ ] **`.gitattributes` with `* text=auto eol=lf`**, or CRLF line endings turn shell scripts into `bad interpreter` errors
 - [ ] **Everything machine-specific in `.env`** — device, VRAM budget, segment size, blob root, model cache. The VM gets a different `.env` and nothing else changes
 - [ ] **Blob store behind the `BlobStore` Protocol** with its root from config (already in the plan, §4)
@@ -65,16 +79,13 @@ It is a Linux computer you drive through a terminal — nothing more exotic. Eve
 - **Skip remote desktop.** Installing a desktop environment on a headless server to look at a file manager is wasted effort
 - **Learn `tmux` — the one genuinely new skill, ten minutes.** Closing an SSH session kills anything running in it, so starting an overnight job and shutting your laptop will silently murder it. `tmux new -s train`, start the job, `Ctrl-B` then `D` to detach, `tmux attach -t train` to return. Practice this during Saturday's smoke test, because Tuesday and Thursday both depend on it
 
-### Sync and deploy
+### Sync
 
-Code lives in git and is checked out in both places, so the local GPU can run it. Lowest-friction deploy for a solo sprint is adding the VM as a second remote:
+Code lives in git and is checked out in both places, so the local GPU can run it. **GitHub is the sync mechanism and the deliverable**; the VM gets code by `git pull` on its own clone at `/srv/elums`.
 
-```bash
-git remote add vm ssh://root@108.39.26.2:48585/srv/elums.git
-git push vm main     # post-receive hook runs docker compose up -d --build
-```
+> **Superseded Oct 6.** This section used to propose the VM as a second git remote with a `post-receive` hook running `docker compose up -d --build`. That cannot work — the box has no Docker Engine ([docs/vm-baseline.md](docs/vm-baseline.md)) — and it is moot regardless, since the VM is not a deployment target. Nothing is "deployed" by us at all.
 
-Still push to GitHub as the real backup. **The VM is a single box on a high port behind someone else's NAT and must not hold the only copy of nine days of work.**
+**The VM must not hold the only copy of anything.** It is an unprivileged container with `workspace_is_volume: false`: a recycle destroys it. Push code to GitHub at every milestone, and copy trained checkpoints and results off the box the moment they exist.
 
 ---
 
@@ -121,6 +132,8 @@ git --version && tmux -V
 **End state:** `make up` is green, you can log in as a seeded user, and uploading an MP3 returns a vocal stem and an instrumental. The VM is verified and downloading in the background.
 
 > Separation at ~7 GB is the one tight fit on 8–12 GB. If it will not hold, turn `--mdxc_segment_size` down — slower, but it fits. Find this out today, not Sunday.
+>
+> **Resolved Oct 3, confirmed Oct 6 — this was the right instruction and it worked.** `segment_size` was set to 128 (half audio-separator's mdxc default of 256) on Day 1 and separation measures **1.8 GB**, not 7 GB, on real full-length songs. An OOM ladder halving down to a floor of 32 was built as well, so the escape hatch is automatic rather than manual. See the measured table at the top of this document.
 
 ---
 
@@ -246,7 +259,7 @@ Real iPhone in hand from hour one. **Work this list top-down and cut from the bo
 
 ---
 
-## Sun Oct 11 — 8hr — Recommendations, sharing, VM deployment → **M6**
+## Sun Oct 11 — 8hr — Recommendations, sharing, deliverable hardening → **M6**
 
 **Recommendations (3hr)**
 
@@ -263,13 +276,15 @@ Real iPhone in hand from hour one. **Work this list top-down and cut from the bo
 - [ ] Web Share with `canShare({files})` checked first and `share()` as the **first await** in the gesture handler; copy-link fallback
 - [ ] Pillow OG cards (deterministic → cacheable); Jinja2 share pages at `/s/{id}`
 
-**VM deployment rehearsal (1.5hr)** — the one mandatory VM task, and the only thing on this schedule that cannot be deferred
+**Deliverable hardening (1.5hr)** — replaces the former "VM deployment rehearsal." Smule deploys this themselves, so the clean clone *is* the product and this is the only work that protects it
 
-- [ ] Fresh clone on the VM, VM-specific `.env`, `docker compose up -d --build`
-- [ ] Kick off **bulk ingest of the 20–30 song demo catalog** in `tmux` and let it run while you keep working
-- [ ] Verify end to end through the SSH tunnel: `localhost:8080` serves the app, auth works, a take uploads and scores
-- [ ] Named **Cloudflare Tunnel** so a phone can reach it — quick `trycloudflare.com` tunnels cap at 200 in-flight requests and do not support SSE, which would make this look broken in a way that reads as your bug (§13)
-- [ ] Re-run the CLAP embedding job over the full catalog now that it exists on the VM
+- [ ] **Production compose topology.** Today's stack is a dev stack: [deploy/Caddyfile](deploy/Caddyfile) proxies the Vite dev server at `frontend:5173`, `api` runs `--reload`, and source is bind-mounted into every service. Add a built-frontend target served as static assets, with no bind mounts and no reload
+- [ ] **A cross-platform model fetch.** `/models/` is gitignored, so a fresh clone has no weights — and the only fetch script is `scripts/download_weights.ps1`, which is PowerShell. Add `make fetch-models` that works on Linux, covering everything in [config/models.yaml](config/models.yaml) (~4–5 GB; the 913 MB RoFormer checkpoint is the one that does not auto-download)
+- [ ] **Make one command actually one command.** `up`, `migrate`, and `seed` are three separate `Makefile` targets today; a deployer following the README gets a running stack against an unmigrated database
+- [ ] **GPU/CPU compose profiles.** `gpus: all` is unconditional on `gpu-worker`, so `docker compose up` hard-fails on a host without an NVIDIA GPU or the container toolkit. Risk 2 already names the CPU ingest fallback; wire it to a profile. Auto-detect `EXPECTED_SM_ARCH` from `torch.cuda.get_device_capability()` rather than defaulting to this machine's `sm_86`
+- [ ] **Decide what ships as seed content.** `/data/*` is gitignored, so their first run has zero songs and zero performances. Resolve the two licensing questions (GTSinger-derived technique-head checkpoint; shippable demo audio) and ship whatever is clear
+- [ ] Bulk-ingest the 20–30 song demo catalog locally for your own demo recording, and re-run the CLAP embedding job over the full catalog
+- [ ] Named **Cloudflare Tunnel** for phone testing — quick `trycloudflare.com` tunnels cap at 200 in-flight requests and do not support SSE, which would make this look broken in a way that reads as your bug (§13)
 
 **Buffer + submission prep (1.5hr)**
 
@@ -285,9 +300,8 @@ Real iPhone in hand from hour one. **Work this list top-down and cut from the bo
 ## Mon Oct 12 — 2hr — Finalize
 
 - [ ] Final pass on the README and writeup
-- [ ] Record a demo walkthrough video **against the VM deployment**, not local — that is the artifact Smule will stand up
-- [ ] Verify once more that a fresh clone plus a documented `.env` reaches a working app with one command, and that seed data loads
-- [ ] Confirm the catalog on the VM is fully ingested and the tunnel is live
+- [ ] Record a demo walkthrough video **against the local stack** — correct now that Smule deploys the repo themselves; there is no deployment of ours for it to be recorded against
+- [ ] **Clean-room verification on a real Linux Docker host.** Fresh clone, documented `.env`, fetch models, one command, seed data loads, a take uploads and scores. This is the deliverable's only acceptance test, and neither Docker Desktop nor the VM can run it — Docker Desktop goes through the WSL2 shim rather than a native Engine plus `nvidia-container-toolkit`, and the VM has no Docker at all. An hour on a throwaway hourly GPU box is the cheapest way to have actually checked
 - [ ] Push and submit
 
 ---

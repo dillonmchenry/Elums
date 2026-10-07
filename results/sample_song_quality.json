@@ -1,0 +1,490 @@
+[
+  {
+    "file": "fill-me-up-ellody.mp3",
+    "song_id": "01a10f01-cf55-723e-b8ef-6b2c63c7db7e",
+    "final_status": "succeeded",
+    "note_count": 326,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.0800000000000125,
+    "median_note_duration_s": 0.1853067427100754,
+    "word_count": 343,
+    "bpm": 85.0,
+    "key_tonic": "F#",
+    "key_mode": "major",
+    "key_tonic_from_notes": "F#",
+    "key_mode_from_notes": "major",
+    "key_confidence_from_notes": 0.16121898867549855,
+    "duration_s": 268.3036734693878,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.5886847303492229,
+    "voiced_duration_s": 163.72390022675742,
+    "lyrics_source": "whisper",
+    "word_count_db": 343,
+    "syllable_count": 380,
+    "vocable_event_count": 0,
+    "key_confidence_chroma": 0.2249403270765148,
+    "f0_blob_sha256": "234d3095d8cae3df0a78466c7838b73b9740f79d83dd4899f809cf3c34cfab4e",
+    "f0_frame_count": 26831,
+    "f0_frame_count_expected": 26830,
+    "f0_frame_count_diff": 1,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 29992,
+        "vram_peak_mb": 1798.30126953125
+      },
+      "structure_beats": {
+        "duration_ms": 39667,
+        "vram_peak_mb": 1179.5927734375
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 15095,
+        "vram_peak_mb": 1645.314453125
+      },
+      "ctc_alignment": {
+        "duration_ms": 3391,
+        "vram_peak_mb": 687.09814453125
+      },
+      "f0": {
+        "duration_ms": 2774,
+        "vram_peak_mb": 2011.74658203125
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "havent-met-you-yet.mp3",
+    "song_id": "01a10f03-5429-734d-bc5a-513449c9c041",
+    "final_status": "succeeded",
+    "note_count": 398,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.0800000000000125,
+    "median_note_duration_s": 0.12000000000000455,
+    "word_count": 541,
+    "bpm": 122.0,
+    "key_tonic": "D#",
+    "key_mode": "major",
+    "key_tonic_from_notes": "A#",
+    "key_mode_from_notes": "minor",
+    "key_confidence_from_notes": 0.18673495235780124,
+    "duration_s": 245.20272108843537,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.6022185065861915,
+    "voiced_duration_s": 185.39972789115652,
+    "lyrics_source": "whisper",
+    "word_count_db": 541,
+    "syllable_count": 589,
+    "vocable_event_count": 3,
+    "key_confidence_chroma": 0.04117557486270795,
+    "f0_blob_sha256": "1f244ccf15b376d97ae7b0622cf28514d3d810a81338ee7cb0f215cc7b3db118",
+    "f0_frame_count": 24521,
+    "f0_frame_count_expected": 24520,
+    "f0_frame_count_diff": 1,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 28427,
+        "vram_peak_mb": 1798.30126953125
+      },
+      "structure_beats": {
+        "duration_ms": 36245,
+        "vram_peak_mb": 1129.28466796875
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 19958,
+        "vram_peak_mb": 1669.25146484375
+      },
+      "ctc_alignment": {
+        "duration_ms": 3461,
+        "vram_peak_mb": 808.28076171875
+      },
+      "f0": {
+        "duration_ms": 2587,
+        "vram_peak_mb": 1896.099609375
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "hot-n-cold.mp3",
+    "song_id": "01a10f04-e461-720c-a03c-cf2ea8b13bd1",
+    "final_status": "succeeded",
+    "note_count": 345,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.0800000000000125,
+    "median_note_duration_s": 0.15000000000000568,
+    "word_count": 363,
+    "bpm": 133.0,
+    "key_tonic": "A",
+    "key_mode": "minor",
+    "key_tonic_from_notes": "D",
+    "key_mode_from_notes": "major",
+    "key_confidence_from_notes": 0.02157628699280456,
+    "duration_s": 218.75045351473923,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.7514627902724447,
+    "voiced_duration_s": 195.6281179138322,
+    "lyrics_source": "lrclib",
+    "word_count_db": 363,
+    "syllable_count": 396,
+    "vocable_event_count": 0,
+    "key_confidence_chroma": 0.022683140369698207,
+    "f0_blob_sha256": "da379e4ef8115593cc8b19269812ccd976a7b246f03aa30f7b8d64f419287d5c",
+    "f0_frame_count": 21876,
+    "f0_frame_count_expected": 21875,
+    "f0_frame_count_diff": 1,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 25295,
+        "vram_peak_mb": 1820.75439453125
+      },
+      "structure_beats": {
+        "duration_ms": 31938,
+        "vram_peak_mb": 1093.2333984375
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 210,
+        "vram_peak_mb": 0.0
+      },
+      "ctc_alignment": {
+        "duration_ms": 3440,
+        "vram_peak_mb": 748.37109375
+      },
+      "f0": {
+        "duration_ms": 2426,
+        "vram_peak_mb": 1746.7197265625
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "is-this-all-liz-james.mp3",
+    "song_id": "01a10f05-ffe9-7f40-bc89-eba849021a16",
+    "final_status": "succeeded",
+    "note_count": 221,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.0800000000000125,
+    "median_note_duration_s": 0.23999999999999488,
+    "word_count": 231,
+    "bpm": 103.0,
+    "key_tonic": "G",
+    "key_mode": "minor",
+    "key_tonic_from_notes": "A",
+    "key_mode_from_notes": "minor",
+    "key_confidence_from_notes": 0.036342632041448275,
+    "duration_s": 221.31521541950113,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.6232604373757455,
+    "voiced_duration_s": 175.36870748299322,
+    "lyrics_source": "whisper",
+    "word_count_db": 231,
+    "syllable_count": 258,
+    "vocable_event_count": 0,
+    "key_confidence_chroma": 0.07420003926827523,
+    "f0_blob_sha256": "c00dc310ccaeae2a155f34562a81c8d8f3f5a5406373c97b7c1c0c8b938da9e3",
+    "f0_frame_count": 22132,
+    "f0_frame_count_expected": 22132,
+    "f0_frame_count_diff": 0,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 24880,
+        "vram_peak_mb": 1830.55419921875
+      },
+      "structure_beats": {
+        "duration_ms": 34108,
+        "vram_peak_mb": 1109.2998046875
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 13410,
+        "vram_peak_mb": 1674.150390625
+      },
+      "ctc_alignment": {
+        "duration_ms": 3106,
+        "vram_peak_mb": 752.09814453125
+      },
+      "f0": {
+        "duration_ms": 2498,
+        "vram_peak_mb": 1776.650390625
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "losing-my-religion.mp3",
+    "song_id": "01a10f07-6128-7aad-8348-10a4569dec66",
+    "final_status": "succeeded",
+    "note_count": 193,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.0800000000000125,
+    "median_note_duration_s": 0.27605442176871975,
+    "word_count": 138,
+    "bpm": 125.0,
+    "key_tonic": "A",
+    "key_mode": "minor",
+    "key_tonic_from_notes": "A",
+    "key_mode_from_notes": "minor",
+    "key_confidence_from_notes": 0.25468974992214743,
+    "duration_s": 268.56596371882085,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.5236251256655621,
+    "voiced_duration_s": 175.9492063492064,
+    "lyrics_source": "lrclib",
+    "word_count_db": 138,
+    "syllable_count": 160,
+    "vocable_event_count": 13,
+    "key_confidence_chroma": 0.04805862935056848,
+    "f0_blob_sha256": "52183bdcd3e5e6194371220f5628dfe2f20d4a3cadc498108a1516cc960da3e5",
+    "f0_frame_count": 26857,
+    "f0_frame_count_expected": 26857,
+    "f0_frame_count_diff": 0,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 29305,
+        "vram_peak_mb": 1827.13720703125
+      },
+      "structure_beats": {
+        "duration_ms": 40097,
+        "vram_peak_mb": 1209.12451171875
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 458,
+        "vram_peak_mb": 0.0
+      },
+      "ctc_alignment": {
+        "duration_ms": 3101,
+        "vram_peak_mb": 639.16845703125
+      },
+      "f0": {
+        "duration_ms": 2634,
+        "vram_peak_mb": 2045.64453125
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "million-reasons.mp3",
+    "song_id": "01a10f08-b69c-7dad-8bc2-d9b54a4ab27d",
+    "final_status": "succeeded",
+    "note_count": 318,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.08000000000000007,
+    "median_note_duration_s": 0.1599999999999966,
+    "word_count": 321,
+    "bpm": 130.0,
+    "key_tonic": "C",
+    "key_mode": "major",
+    "key_tonic_from_notes": "C",
+    "key_mode_from_notes": "major",
+    "key_confidence_from_notes": 0.13493256980602153,
+    "duration_s": 205.6892290249433,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.8154018182702124,
+    "voiced_duration_s": 180.90666666666667,
+    "lyrics_source": "whisper",
+    "word_count_db": 321,
+    "syllable_count": 396,
+    "vocable_event_count": 0,
+    "key_confidence_chroma": 0.200321087488896,
+    "f0_blob_sha256": "b7b1db84aac8ccec237dc2e8840406ebb20574b0877f353e1f44f278ec730f3e",
+    "f0_frame_count": 20569,
+    "f0_frame_count_expected": 20569,
+    "f0_frame_count_diff": 0,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 23002,
+        "vram_peak_mb": 1830.28759765625
+      },
+      "structure_beats": {
+        "duration_ms": 28358,
+        "vram_peak_mb": 1074.17626953125
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 12838,
+        "vram_peak_mb": 1675.99658203125
+      },
+      "ctc_alignment": {
+        "duration_ms": 3288,
+        "vram_peak_mb": 800.90234375
+      },
+      "f0": {
+        "duration_ms": 2404,
+        "vram_peak_mb": 1684.521484375
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "no-scrubs.mp3",
+    "song_id": "01a10f09-e8c6-7633-bdba-3d04a3df79fa",
+    "final_status": "succeeded",
+    "note_count": 361,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.08000000000000007,
+    "median_note_duration_s": 0.15000000000000568,
+    "word_count": 485,
+    "bpm": 92.0,
+    "key_tonic": "G#",
+    "key_mode": "minor",
+    "key_tonic_from_notes": "B",
+    "key_mode_from_notes": "major",
+    "key_confidence_from_notes": 0.16451946652968175,
+    "duration_s": 214.54473922902494,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.8243299930086228,
+    "voiced_duration_s": 193.68925170068024,
+    "lyrics_source": "whisper",
+    "word_count_db": 485,
+    "syllable_count": 559,
+    "vocable_event_count": 1,
+    "key_confidence_chroma": 0.11343328207433978,
+    "f0_blob_sha256": "d8774dfb5f2dd72339f3bb4dd59ae078268d0ba5538f5e7921119622e36b84c8",
+    "f0_frame_count": 21455,
+    "f0_frame_count_expected": 21454,
+    "f0_frame_count_diff": 1,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 23624,
+        "vram_peak_mb": 1828.98291015625
+      },
+      "structure_beats": {
+        "duration_ms": 31439,
+        "vram_peak_mb": 1092.75830078125
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 17580,
+        "vram_peak_mb": 1675.056640625
+      },
+      "ctc_alignment": {
+        "duration_ms": 3307,
+        "vram_peak_mb": 782.95068359375
+      },
+      "f0": {
+        "duration_ms": 2344,
+        "vram_peak_mb": 1717.787109375
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  },
+  {
+    "file": "yesterday.mp3",
+    "song_id": "01a10f0b-3e34-7f3e-96e4-dbcf03301f26",
+    "final_status": "succeeded",
+    "note_count": 128,
+    "syllable_boundary_violations": 0,
+    "syllable_boundary_violation_rate": 0.0,
+    "out_of_range_notes": 0,
+    "min_note_duration_s": 0.08000000000000185,
+    "median_note_duration_s": 0.2683174835714084,
+    "word_count": 124,
+    "bpm": 95.0,
+    "key_tonic": "F",
+    "key_mode": "major",
+    "key_tonic_from_notes": "D",
+    "key_mode_from_notes": "minor",
+    "key_confidence_from_notes": 0.1082272719758991,
+    "duration_s": 125.66639455782312,
+    "frame_rate_hz": 100.0,
+    "voiced_frame_ratio": 0.7353385851834169,
+    "voiced_duration_s": 106.12680272108845,
+    "lyrics_source": "whisper",
+    "word_count_db": 124,
+    "syllable_count": 156,
+    "vocable_event_count": 0,
+    "key_confidence_chroma": 0.23730993573338965,
+    "f0_blob_sha256": "086ce098724a3f004d267326cb191cc8cf63a69dd146f05e6d751327c407abc9",
+    "f0_frame_count": 12567,
+    "f0_frame_count_expected": 12567,
+    "f0_frame_count_diff": 0,
+    "stage_results": {
+      "separation": {
+        "duration_ms": 16333,
+        "vram_peak_mb": 1826.56005859375
+      },
+      "structure_beats": {
+        "duration_ms": 18007,
+        "vram_peak_mb": 895.92626953125
+      },
+      "rms_vad": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      },
+      "lyrics": {
+        "duration_ms": 10468,
+        "vram_peak_mb": 1662.8857421875
+      },
+      "ctc_alignment": {
+        "duration_ms": 2682,
+        "vram_peak_mb": 682.79345703125
+      },
+      "f0": {
+        "duration_ms": 1672,
+        "vram_peak_mb": 1191.91650390625
+      },
+      "note_grid": {
+        "duration_ms": null,
+        "vram_peak_mb": null
+      }
+    }
+  }
+]

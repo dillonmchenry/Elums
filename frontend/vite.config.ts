@@ -14,5 +14,11 @@ export default defineConfig({
     hmr: {
       clientPort: 8080,
     },
+    // Windows host edits do not emit inotify events across Docker
+    // Desktop's bind mount, so Vite never sees them without polling.
+    watch: {
+      usePolling: true,
+      interval: 300,
+    },
   },
 })

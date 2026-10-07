@@ -114,6 +114,14 @@ export function SongPage() {
   const { id } = useParams<{ id: string }>();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [currentTimeS, setCurrentTimeS] = useState(0);
+  // Shared with NoteLane below so the two timelines render at the same
+  // pixels-per-second scale — previously the note lane was hardcoded to
+  // 800px while the waveform filled its container's actual width (near
+  // 1126px per index.css's `#root`), so a note's x-position could not
+  // line up with the same timestamp on the waveform at all. Found during
+  // the Day 5 MA-1 listening spot-check: onset-accuracy judgment is
+  // unreliable if the two lanes are drawn to different scales.
+  const [laneWidth, setLaneWidth] = useState(800);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -145,6 +153,20 @@ export function SongPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (state.kind !== "ready" || !containerRef.current) return;
+    // Measures the waveform container's actual rendered width and keeps
+    // NoteLane in lockstep with it (ResizeObserver, not just a one-shot
+    // read) so the two lanes stay pixel-for-pixel aligned across window
+    // resizes too, not just on first paint.
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width && width > 0) setLaneWidth(width);
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [state.kind]);
 
   useEffect(() => {
     if (state.kind !== "ready" || !containerRef.current) return;
@@ -195,7 +217,7 @@ export function SongPage() {
         Play / pause
       </button>
 
-      <NoteLane chart={state.chart} width={800} />
+      <NoteLane chart={state.chart} width={laneWidth} />
       <LyricsView chart={state.chart} currentTimeS={currentTimeS} />
     </main>
   );

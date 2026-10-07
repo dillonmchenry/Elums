@@ -419,3 +419,57 @@ Three flaws surfaced by the expanded 8-song sample (invisible at n=2):
 3. **`voiced_frame_ratio` (RMVPE) reads systematically lower than VAD's `voiced_duration_s/duration_s`** across all 8/8 songs, mean diff ≈ -0.11, every song negative — not noise, a consistent one-directional gap. Likely a genuine definitional difference (RMVPE's pitch-confidence gate vs VAD's energy gate also catching unvoiced consonants/breath), not independently confirmed. **Also added to Wednesday's plan** (per the user's explicit instruction, overriding this agent's earlier recommendation to defer it to backlog as unconsumed by any feature today): a `thred` sweep (0.01/0.03/0.05) on 2–3 real songs to determine whether the gap narrows (miscalibration) or holds (document as a real measurement-definition difference).
 
 **Backlog, not scheduled anywhere yet:** a deeper fix for flaw #2 above — blending the two correlation vectors (chroma over the instrumental + duration-weighted note-pitch histogram) into one combined KS correlation before picking a key, rather than running two independent estimates and reconciling after the fact — was identified as more accurate in principle but is a real research question (how to weight/combine the two vectors, not validated against any ground truth), not a quick fix. Needs its own investigation before scheduling.
+
+### 11. Delivery mode clarified — **MA-3/MA-5 is closed, and the risk moved** (post-handoff, same evening)
+
+**The brief's own wording, re-read tonight:** *"you will deliver the source code to us, and we will deploy the application internally."*
+
+**That closes the deployment question outright, after five days open as "the largest item on the project"** (§6 of Days 1–3, §8 above, MA-3 in the Oct 3/4 plans, MA-5 in the Oct 6 plan). There was never a deployment decision to make. We host nothing; the deliverable is a repository. Three stale instructions follow from the misreading and have been corrected rather than left to be discovered on Oct 11:
+
+- `ELUMS_BUILD_SCHEDULE.md`'s "VM's unique value" table listed **"the deployment target"** as a row. Removed — the VM is training and bulk-compute capacity only.
+- Sun Oct 11's **"VM deployment rehearsal — the one mandatory VM task, and the only thing on this schedule that cannot be deferred"** no longer exists. Its 1.5 h is reallocated to deliverable hardening (list below).
+- Mon Oct 12's **"record the demo video against the VM deployment, not local"** is obsolete. Local is now the correct target, not a compromise.
+- The "Sync and deploy" section's `git remote add vm` + `post-receive` → `docker compose up -d --build` was already impossible (no Docker Engine on the box, `docs/vm-baseline.md`) and is now also moot.
+
+**The risk did not go away, it relocated — and it got larger.** A broken one-command bootstrap was previously survivable because a working demo host would have carried the impression. It is now the entire delivery surface: `git clone` → documented `.env` → one command → a working app, on *their* Linux host with a real Docker Engine. Six concrete gaps found by direct inspection tonight, none of them previously recorded:
+
+1. **No Linux weight-fetch path exists.** `.gitignore` excludes `/models/`, so a fresh clone has no weights — ~4–5 GB per `config/models.yaml`. Some auto-download on first use (`torch.hub`/HF), but `vocals_mel_band_roformer.ckpt` (913 MB) does not; its only fetch path is `scripts/download_weights.ps1`, **PowerShell**. `scripts/` holds exactly one other fetch script (`download_datasets.sh`, GTSinger-only). The `Makefile` has no `fetch-models` target.
+2. **"One command" is currently four.** `up`, `migrate`, and `seed` are separate `Makefile` targets and nothing chains them; a deployer following the README gets a running stack against an unmigrated database.
+3. **`gpus: all` is unconditional** on `gpu-worker` (`docker-compose.yaml`). `docker compose up` hard-fails on a host without an NVIDIA GPU or the container toolkit. Risk 2 names a CPU ingest fallback as mitigation; nothing implements it and no compose profile separates GPU from CPU services.
+4. **`EXPECTED_SM_ARCH` defaults to this machine's card.** `.env.example` ships `sm_86` and the `Makefile`'s `.env` target prints "edit per machine." Their GPU is almost certainly covered by the wheel (arch list is `sm_75/80/86/90/100/120`), but the assertion fails until a human edits a file. Should auto-detect from `torch.cuda.get_device_capability()`.
+5. **The app starts empty.** `/data/*` is gitignored (only `data/samples/README.md` survives), so their first run has **zero songs and zero performances** — and §9's three pre-analyzed seed performances are still an open Day 1 loose end. Minute one on their hardware is the only first impression there is.
+6. **No production topology exists, on any machine.** `deploy/Caddyfile` is labelled "M5: full dev routing" and its catch-all proxies `frontend:5173` (the Vite dev server, HMR websocket included); `api` runs `--reload`; source is bind-mounted into every service. The schedule's own "Dev topology is not deployed topology" paragraph requires the *built* frontend as static assets, and that artifact has never been produced.
+
+**Two licensing questions became blocking that previously were not**, because the artifacts now have to physically travel to Smule:
+
+- **Can the technique-head checkpoint ship in the repo?** It is trained on GTSinger (CC BY-NC-SA 4.0). `docs/licensing-audit.md` already concludes GTSinger is usable "for training and reporting results, not for shipping a derivative weight commercially," framing the head as "a research artifact … not a product dependency in itself" — but §11.2 lists six dependents and says two of the three depth bets are among them. If the weight cannot ship, comparative coaching and technique-aware recommendations degrade to their thin versions *on their deployment*. Unresolved.
+- **What audio can ship as a seed catalog?** Two CC-BY tracks are documented in `data/samples/README.md`; the six tracks added for §10's 8-song pass are deliberately uncommitted. Needs a decision between shipping CC-licensed audio with derived artifacts, shipping charts without audio, or asking Smule for licensed content.
+
+**Emails were not sent Oct 6** — held to Oct 7. The deployment question is dropped from them (nothing to ask); the two licensing questions above replace it. Status of the Oct 5 MA-1 send remains unconfirmed in this log, so the DAMP and NanoPitch-grant asks may still be unsent after two days — the two items on the project with the longest pure wall-clock latency.
+
+**Not done tonight, explicitly:** none of the six gaps were fixed. This entry is the record of finding them, and they are scheduled into Oct 11's revised block — not silently assumed resolved.
+
+### 12. Stale VRAM figures corrected across the planning documents (post-handoff, same evening)
+
+Surfaced while reasoning about what hardware Smule would need to provision (§11). The planning documents carried pre-build VRAM estimates that four days of measurement have contradicted, and they were being quoted as fact. **Measured peaks across §10's 8-song validation run** (`results/sample_song_quality.json`), all on the local 8 GB RTX 3070:
+
+| Stage | Peak VRAM | Previously documented as |
+| --- | --- | --- |
+| `f0` (RMVPE) | **2.0 GB** — the pipeline's largest | "RMVPE 362 MB" (a checkpoint size, not VRAM) |
+| `separation` (Mel-Band RoFormer) | **1.8 GB** | "~7 GB" |
+| `lyrics` (Whisper large-v3-turbo) | **1.6 GB** | "~3–5 GB" / "faster-whisper <8 GB" |
+| `structure_beats` (all-in-one's HTDemucs) | **1.2 GB** | "Demucs at defaults is ~7 GB" |
+| `ctc_alignment` (wav2vec2) | **0.7 GB** | not documented |
+| `rms_vad`, `note_grid` | CPU-only | — |
+
+**Why the estimates were high, so the correction is not mistaken for carelessness:** separation runs at `segment_size=128`, half audio-separator's own mdxc default of 256 (`elums/separation/engine.py`, with `override_model_segment_size: True`), chosen defensively per the Oct 3 plan §3.4 for the 8 GB card. The ~7 GB figure is plausibly accurate at default settings — **the measured number must always be quoted with its segment size**, because raising it for quality on a larger card raises the memory with it. The task also halves and re-defers on `torch.cuda.OutOfMemoryError` down to a floor of 32 (`elums/separation/task.py`), so a smaller card degrades rather than fails; that property was undocumented and is now relevant to whoever deploys this.
+
+**Three documents corrected, one claim deliberately weakened rather than deleted:**
+
+1. `ELUMS_BUILD_SCHEDULE.md`'s "Local-first, VM for scale" opener — replaced the estimate list with the measured table, and named all three errors (separation, the RMVPE checkpoint-size-for-VRAM conflation, and the stale "WhisperX" reference, which §Day 3 EC-1 rejected in favour of `transformers` loading the HF checkpoint directly).
+2. `ELUMS_TECHNICAL_APPROACH.md` §11.6 — **the stated reason for serializing the heavyweights was wrong; the decision was right.** Memory pressure is not the constraint: any two stages are concurrently resident on 8 GB with room to spare. Serialization is re-justified on grounds that are not memory — one CUDA context with SM contention and no throughput gain from concurrency, sequential peaks not being the same quantity as concurrent residency plus fragmentation, and the OOM ladder existing because margin is not guaranteed across cards.
+3. `ELUMS_TECHNICAL_APPROACH.md` §12.3 — the heading claim "16 GB cannot host both" overstated. At measured values a Q4 27B (~14 GB) plus the heaviest single audio stage (2.0 GB) is ~16 GB against a 16,311 MiB card: the ceiling, with zero margin and constant load/evict churn around a resident LLM. Weakened to "no margin for both" and the conclusion kept — hosted inference stays the default, and §12.3 already said independently that the demo must not depend on local.
+
+**Deliberately not changed:** `elums/separation/engine.py`'s comment, which still cites the Oct 3 three-second-clip measurement and carries an open "revisit on a full-length song." The 8-song run is that revisit and its numbers hold (1798–1830 MB on real full-length tracks vs the comment's ~1.7 GB), but the owner's call was to leave code comments out of this pass. Flagged here so it is a known stale comment rather than an unnoticed one.
+
+**Also unchanged, and worth stating:** the dated plans for Oct 3/4/5 and PROGRESS Days 1–3 all quote the old figures and were left alone, same append-only discipline as §11. They are records of what was believed on those days, not current claims.

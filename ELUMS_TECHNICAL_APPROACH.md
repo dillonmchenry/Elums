@@ -197,7 +197,7 @@ flowchart LR
   B --> C["Structure + beats<br/>all-in-one-infer"]
   B --> D["RMS-VAD segments<br/>from vocal stem"]
   D --> E["Lyrics:<br/>LRCLIB, else Whisper"]
-  E --> F["Align: WhisperX CTC<br/>char-level timings"]
+  E --> F["Align: CTC<br/>char-level timings"]
   B --> G["F0: RMVPE"]
   F --> H["Note grid:<br/>derivative segmentation<br/>constrained by syllables + beats"]
   G --> H
@@ -213,7 +213,9 @@ flowchart LR
 
 Short-circuit it where possible: [LRCLIB](https://lrclib.net/) gives line-level synced lyrics for free, reducing the problem to word-within-line.
 
-**Syllable timing, free.** WhisperX's aligner is internally **character-level** — it builds `char_segments_arr` with per-character start/end and only then collapses to words. Grouping characters into syllables with a hyphenation dictionary for split points and CTC timings for boundaries is strictly better than UltraSinger's approach, whose README admits it "simply splits the word, without paying attention to whether the separated word really starts at the place."
+**Syllable timing, free.** Forced CTC alignment is internally **character-level** — it builds per-character start/end and only then collapses to words. Grouping characters into syllables with a hyphenation dictionary for split points and CTC timings for boundaries is strictly better than UltraSinger's approach, whose README admits it "simply splits the word, without paying attention to whether the separated word really starts at the place."
+
+> **Corrected Oct 6 — WhisperX is not what this ships.** This section originally named WhisperX as the aligner, including its own `char_segments_arr` output field above. `whisperx` was evaluated at build time (PROGRESS Day 3 EC-1) and found to fight the project's one-wheel CUDA discipline: it pulls `ctranslate2` + `faster-whisper` + `pyannote.audio` against `torch==2.14.1+cu130`/Python 3.13, and the Whisper weights on disk are HF-transformers format, not the CTranslate2 format it expects — a model conversion on top of a dependency fight. **What ships instead is the plan's own named fallback, which turned out to be the real design, not a downgrade:** `transformers` (5.9.0) loads the HF checkpoint directly for transcription, and `torchaudio.functional.forced_align` drives torchaudio's bundled `WAV2VEC2_ASR_BASE_960H` wav2vec2 CTC pipeline for alignment (`torchaudio==2.11.0`, BSD-3-Clause). Same algorithm family — CTC Viterbi forced alignment against known text, char-level spans first and word collapse second — so every claim in this section about what CTC alignment gives you (character-level boundaries, the syllable-grouping argument against UltraSinger) holds unchanged. Only the library producing it differs. See `config/models.yaml`'s `lyrics_transcription`/`lyrics_alignment` entries and `docs/licensing-audit.md` for the resolved identifiers and licenses.
 
 **Note grid.** Best-in-world note-level transcription with correct onset+offset+pitch is ~61% F1 (T3MS on MIR-ST500). Do not plan for a clean automatic chart; plan a correction UI. But we hold three constraints research models don't: syllable spans, a beat grid, and a key. Derivative-peak + inverse-confidence segmentation over the RMVPE track, constrained to syllable spans and snapped to the beat grid, should beat an unconstrained learned model on charting quality for ~50 lines of signal processing and no license entanglement. [ROSVOT](https://github.com/RickyL-2000/ROSVOT) (MIT, ships weights, consumes word boundaries we already have) is the learned fallback.
 
@@ -736,7 +738,9 @@ torch.zeros(8, device="cuda").add_(1).cpu()   # force a real kernel launch
 
 **Skip `flash-attn` and `xformers` entirely.** PyPI flash-attn ships sm_80/sm_90 kernels only, the community Blackwell wheel repo was archived in Aug 2026, and a source build means `FLASH_ATTN_CUDA_ARCHS=120` plus a long nvcc step in the Dockerfile. Our sequences are short; `scaled_dot_product_attention` is sufficient. **Demucs must be ≥4.1.0** (July 2026) — older versions pin `torchaudio<2.1` and will not run.
 
-**GPU serving: an in-process model registry with per-class `asyncio.Semaphore`**, ~150 lines, not Triton (wants per-model repositories and ONNX/TRT exports for research PyTorch with Python pre/post-processing), not Ray (a cluster on one box), not LitServe (scales replicas when the problem is four different models in 16 GB). The VRAM budget is tight — Demucs at defaults is ~7 GB and faster-whisper large-v2 is <8 GB — so **serialize the two heavyweights** and evict between stages. Procrastinate's named lock enforces this across jobs; the semaphore enforces it within the process. Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
+**GPU serving: an in-process model registry with per-class `asyncio.Semaphore`**, ~150 lines, not Triton (wants per-model repositories and ONNX/TRT exports for research PyTorch with Python pre/post-processing), not Ray (a cluster on one box), not LitServe (scales replicas when the problem is four different models in 16 GB). **Serialize the heavyweights** and evict between stages: Procrastinate's named lock enforces this across jobs, the semaphore within the process. Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
+
+> **Measured Oct 6 — the stated reason for serializing was wrong, the decision was right.** This paragraph justified serialization with "the VRAM budget is tight — Demucs at defaults is ~7 GB and faster-whisper large-v2 is <8 GB." Neither figure describes what this pipeline runs. Measured peaks on the 8 GB local card (`results/sample_song_quality.json`, 8 songs): RMVPE **2.0 GB**, Mel-Band RoFormer separation **1.8 GB** at `segment_size=128`, Whisper large-v3-turbo **1.6 GB**, all-in-one's HTDemucs **1.2 GB**, wav2vec2 CTC **0.7 GB**. Any two of those are concurrently resident on 8 GB with room to spare, so memory pressure is not the constraint. Serialization stays for three reasons that are not memory: there is one CUDA context and concurrent jobs contend for the same SMs with no throughput gain; sequential peaks are not the same quantity as concurrent residency plus allocator fragmentation; and the separation task's own OOM ladder (halve `segment_size` and re-defer, floor 32) exists precisely because margin is not guaranteed across cards. Note also that **faster-whisper is not used** — `transformers` loads the HF checkpoint directly (PROGRESS Day 3 EC-1).
 
 ---
 
@@ -783,11 +787,11 @@ That is ~8 calls per analysis. At ~2,500 input and ~600 output tokens against th
 
 **Budget is not the constraint; latency is.** At ~69 tok/s a 600-token response takes ~9 s, far too slow for a post-song reveal. Stream the coaching copy, and pre-generate challenges on a schedule rather than on request.
 
-### 12.3 Why the credits exist: 16 GB cannot host both
+### 12.3 Why the credits exist: 16 GB has no margin for both
 
 The model is Apache 2.0 with downloadable weights, and local inference is genuinely viable on the provided card. The hybrid architecture — only 16 of 64 layers are full attention, the rest Gated DeltaNet — makes the KV cache ~4× smaller than a conventional 27B, and it ships an MTP speculative-decoding head. Community reports on this exact GPU put IQ4_XS/IQ3_S + MTP (`--spec-draft-n-max 1`) with quantized KV at **30–45 tok/s** at ≤32K on-GPU context, which is competitive with the hosted path once network latency is counted.
 
-**But not concurrently with the audio stack.** A Q4 27B wants ~14 GB, separation ~7 GB, faster-whisper <8 GB. On 16 GB you can have the language model or the ingest pipeline, not both. That is the clearest reading of why API credits were provided alongside a single-GPU box: **the OpenRouter budget is what keeps the GPU free for audio ML.**
+**But not comfortably alongside the audio stack.** A Q4 27B wants ~14 GB. The audio pipeline's measured peak is **2.0 GB** for its heaviest single stage (RMVPE), not the ~7 GB separation and <8 GB ASR this section originally assumed — see §11.6's correction. That changes the strength of the claim without changing the conclusion: 14 + 2 lands at roughly **16 GB against a 16,311 MiB card**, which is the ceiling with no margin for allocator fragmentation, and it only works if the LLM stays resident while every audio model loads and evicts around it, stage by stage. So it is not *impossible* the way this section used to assert — it is a configuration with zero headroom and a lot of thrash. That remains the clearest reading of why API credits were provided alongside a single-GPU box: **the OpenRouter budget is what keeps the GPU free for audio ML.**
 
 So hosted is the default, and local is built and documented as a capability — the privacy and offline story, and a credible answer to "what if OpenRouter is unavailable" — rather than the operating mode. Do not let the demo depend on it.
 
@@ -838,6 +842,13 @@ Secondarily, `next-pwa` is unmaintained and webpack-only, and `@serwist/turbopac
 **Waveforms: wavesurfer.js 7.12.7 with peaks precomputed server-side** by `audiowaveform` at ingest. Passing `peaks` + `duration` with no `url` renders with zero network requests and zero client-side decode — which is what makes it fast on a phone.
 
 **Deployment.** Docker Compose + NVIDIA Container Toolkit (`capabilities: [gpu]` is mandatory), Caddy 2.11 as reverse proxy. The `ssh -L 8080` access pattern is an **asset, not a problem**: browsers treat `localhost` as a secure context regardless of scheme, so `getUserMedia`, Service Workers, and AudioWorklet all work over plain HTTP through the tunnel — no TLS, no certificate warnings for the reviewer. For phone testing, a **named** Cloudflare Tunnel; quick `trycloudflare.com` tunnels cap at 200 in-flight requests and **do not support Server-Sent Events**, which would make a real-time karaoke app look broken in a way that reads as our bug.
+
+**Who deploys, clarified Oct 6.** The brief's wording is *"you will deliver the source code to us, and we will deploy the application internally."* So **we host nothing.** There is no demo host to provision, no deployment target to choose, and the provided vast.ai box is training and bulk-compute capacity only — a reading that cost five days as an open "deployment decision" before the brief was re-read (`PROGRESS.md` Day 4 §11).
+
+Two consequences follow, and they raise the stakes on work that previously looked like polish:
+
+- **The clean clone is the product.** `git clone` → documented `.env` → one command → a working app on *their* hardware is the entire delivery surface, and it is the one thing no demo video can compensate for. It needs to be true on a Linux host with a real Docker Engine, which is a different environment from Docker Desktop's WSL2 shim and cannot be verified on the vast.ai box at all.
+- **Their deployment must be able to run without our artifacts.** Anything gitignored — `/models/` (~4–5 GB of weights) and `/data/*` (all audio) — either needs an automated fetch or a documented absence. A first run with an empty catalog is the only first run they get, so what ships as seed content is a product decision, not a packaging detail. The GTSinger-derived technique head (CC BY-NC-SA, §11.1) is the sharp case: two depth bets depend on it and it may not be deliverable as a weight.
 
 **Observability:** structlog JSON with `request_id` / `job_id` / `model` / `duration_ms` / `vram_peak_mb` on every line (one hour of work, highest signal on the list), OpenTelemetry auto-instrumentation with manual spans around the ML stages, and `grafana/otel-lgtm` behind an opt-in compose profile.
 
