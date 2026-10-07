@@ -15,6 +15,20 @@ class PerformanceCreate(BaseModel):
     latency_offset_ms: float | None = None
 
 
+class PerformanceComplete(BaseModel):
+    """Thu Oct 8 (X0): the client now uploads headerless 16-bit PCM
+    chunks (see ``elums/ingest/wav.py``'s docstring for why), so
+    `complete` needs the capture sample rate to build a real WAV
+    header once — unlike MediaRecorder's self-describing WebM, raw PCM
+    chunks carry no format metadata at all. Defaults to 48000 (the
+    common desktop `AudioContext` default) only for backward
+    compatibility with any in-flight pre-X0 client; real callers
+    always send the `AudioContext.sampleRate` they actually captured
+    at (§10.4: never force `sampleRate`, so this varies by device)."""
+
+    sample_rate: int = 48000
+
+
 class PerformancePublic(BaseModel):
     id: uuid.UUID
     song_id: uuid.UUID

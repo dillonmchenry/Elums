@@ -19,13 +19,13 @@ describe("App routing", () => {
     expect(screen.getByRole("heading", { name: "Elums" })).toBeInTheDocument();
   });
 
-  it("renders the diagnostics stub at /diagnostics", () => {
+  it("renders the diagnostics page at /diagnostics", () => {
     render(
       <MemoryRouter initialEntries={["/diagnostics"]}>
         <App />
       </MemoryRouter>
     );
     expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
-    expect(screen.getByText(/Day 3/)).toBeInTheDocument();
+    expect(screen.getByText(/crossOriginIsolated/)).toBeInTheDocument();
   });
 });

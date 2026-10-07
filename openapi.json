@@ -185,6 +185,18 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "PerformanceComplete": {
+        "description": "Thu Oct 8 (X0): the client now uploads headerless 16-bit PCM\nchunks (see ``elums/ingest/wav.py``'s docstring for why), so\n`complete` needs the capture sample rate to build a real WAV\nheader once \u2014 unlike MediaRecorder's self-describing WebM, raw PCM\nchunks carry no format metadata at all. Defaults to 48000 (the\ncommon desktop `AudioContext` default) only for backward\ncompatibility with any in-flight pre-X0 client; real callers\nalways send the `AudioContext.sampleRate` they actually captured\nat (\u00a710.4: never force `sampleRate`, so this varies by device).",
+        "properties": {
+          "sample_rate": {
+            "default": 48000,
+            "title": "Sample Rate",
+            "type": "integer"
+          }
+        },
+        "title": "PerformanceComplete",
+        "type": "object"
+      },
       "PerformanceCreate": {
         "properties": {
           "device_label": {
@@ -998,6 +1010,18 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerformanceComplete",
+                "default": {
+                  "sample_rate": 48000
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

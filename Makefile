@@ -1,4 +1,4 @@
-.PHONY: up down build migrate seed logs ps verify-gpu test openapi
+.PHONY: up down build migrate seed logs ps verify-gpu test openapi nanopitch-wasm
 
 # M4 EC-8: `make` was missing locally (Windows) — installed via
 # `winget install ezwinports.make`. No Windows-only logic lives here;
@@ -56,3 +56,12 @@ openapi:
 .env:
 	cp .env.example .env
 	@echo "Created .env from .env.example — edit EXPECTED_SM_ARCH per machine."
+
+# EC-1 (Oct 8): `emcc` is not on PATH and the host has no emsdk install.
+# `emscripten/emsdk` (Docker image) is Linux-reproducible and avoids a
+# host-local toolchain, matching the project's portability discipline.
+# Mounts the repo root so the script reads vendor/ and writes into
+# frontend/public/nanopitch/ (that path crosses the frontend service's
+# own build context/bind-mount boundary — see build.sh's own comment).
+nanopitch-wasm:
+	docker run --rm -v "$(CURDIR):/repo" -w /repo/vendor/nanopitch/wasm emscripten/emsdk:latest bash build.sh

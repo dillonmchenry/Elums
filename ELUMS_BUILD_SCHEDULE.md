@@ -192,12 +192,15 @@ git --version && tmux -V
 
 > **M2 — sing a song against a chart, get per-note pitch scoring, and join someone else's seed.** "Singing together" is now satisfied in its async form, five days before the deadline.
 
+> **Deviation taken, flagged for Thursday.** EC-0's AudioWorklet + `SharedArrayBuffer` capture graph was not attempted live tonight — no interactive browser/microphone was available in this session to verify it loads through Caddy's COOP/COEP path, which was EC-0's own acceptance bar. `SingPage.tsx` shipped against the plan's own named fallback (`MediaRecorder`) instead, per its own words: *"fall back to MediaRecorder today, ship W3-W6 against it, and move the worklet to Thursday... That costs the zero-allocation guarantee and the live lane, not M2 — say so explicitly rather than sliding."* See `PROGRESS.md`'s Day 5 section for the full writeup. **Re-read against the brief, this is not optional stretch scope**: the brief states *"You will need to learn about WebAssembly and Web Audio to implement features such as acoustic echo cancellation. Note that these features are in scope if needed"* — i.e. AudioWorklet/WebAssembly audio work is itself named in the brief, not merely a vehicle for the AEC filter alone. The descope ladder below still correctly treats the **WASM AEC filter** as the first thing to cut if Thursday runs out of room (headphones are a documented, legitimate product posture per §10.3) — but **transferring capture off `MediaRecorder` and onto a real AudioWorklet graph is not the same cut**, since the live 60fps pitch lane (also named directly in the brief) depends on the worklet's `SharedArrayBuffer` ring, not on the echo canceller. Thursday should therefore prioritize the AudioWorklet transfer itself ahead of the AEC filter specifically.
+
 ---
 
 ## Thu Oct 8 — 8hr — Mobile + real-time audio → **M3**
 
 Real iPhone in hand from hour one. **Work this list top-down and cut from the bottom** — the ordering is deliberate.
 
+- [ ] **0. Transfer capture off `MediaRecorder` onto a real AudioWorklet graph** (carried from Wednesday's EC-0 fallback — see the note above). First, a 15-minute sanity check in a real browser: a no-op worklet loads through Caddy at `:8080` (not Vite's dev port) with COOP/COEP headers set and `crossOriginIsolated` asserted, and survives a production `vite build` + `vite preview`. Only once that is confirmed, replace `SingPage.tsx`'s `MediaRecorder`/chunked-blob-upload path with: `getUserMedia` → `AudioWorkletNode` → `SharedArrayBuffer` ring (`ringbuf.js`) → a Worker draining the ring for upload, and a second Worker consumer for the live pitch lane (item 2 below). This item, not item 4's AEC filter, is the one the brief's "WebAssembly and Web Audio" line actually makes non-negotiable — see the note above the descope ladder's "cut WASM AEC first" entry for why those are two different cuts
 - [ ] **1. iOS Safari works at all.** `audioSession.type` dance: `auto` → `getUserMedia` → `play-and-record`; teardown `playback` → `auto` or output fidelity stays degraded. Silent-switch fix. Capture fallback ladder. Never force `sampleRate` (§10.4)
 - [ ] **2. NanoPitch WASM in the pitch worker.** Emscripten build of `nanopitch.c`, realtime Viterbi, live pitch meter (§2.2)
 - [ ] **3. Latency calibration.** `@adasp/latency-test`, 3 runs, gate on the 18 dB reliability ratio, share the **main** AudioContext, use the **full** round-trip without subtracting `outputLatency`. Ship the manual nudge slider (§10.4)
@@ -317,9 +320,11 @@ The original §14 had a full buffer day; compressing into your hours spent most 
 | 4. Live duet room → async seed/join only (working since Wed) | Lose simultaneity, keep the artifact | Yes — "two users sing together" is met |
 | 3. Partner matching + fit slider → song recommendations only | Lose the duet-matching differentiator | Yes |
 | 2. Group challenges → individual only | Lose the group-competition angle | Partially — the brief names groups |
-| 1. WASM AEC → document the headphone assumption | Lose a brief-named stretch item | Yes — it is "in scope if needed" |
+| 1. WASM AEC *filter* → document the headphone assumption | Lose a brief-named stretch item | Yes — it is "in scope if needed" |
 
 Cutting 1 and 2 first is deliberate: AEC is explicitly optional in the brief, and group challenges are the smallest slice of a required feature. Anything below line 4 starts costing a required feature, so treat line 4 as the floor.
+
+> **Clarified Oct 7, evening.** Line 1 is specifically the adaptive echo-cancellation *algorithm* (partitioned-block FDAF) — cutting it means shipping with the headphones-only posture, which the brief's own "if needed" wording allows. It does **not** mean staying on `MediaRecorder` instead of AudioWorklet: the live pitch lane and `getSettings()`-verified AEC/NS/AGC opt-out are both named directly in the brief's capture requirements, and both need the AudioWorklet + `SharedArrayBuffer` graph to exist regardless of whether the FDAF filter itself gets built inside it. Transferring off `MediaRecorder` is Thursday's item 0, ahead of this ladder.
 
 ## Daily discipline
 

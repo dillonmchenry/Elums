@@ -24,11 +24,12 @@ from elums.blobs.service import record_blob
 from elums.blobs.store import BlobStore
 from elums.config import settings
 from elums.ingest.probe import UndecodableAudioError, probe_audio
+from elums.ingest.wav import build_wav_header
 from elums.jobs.app import app as procrastinate_app
 from elums.models.performance import Performance, PerformanceKind, PerformanceStatus
 from elums.models.song import Song, SongVisibility
 from elums.models.user import User
-from elums.schemas.performances import PerformanceCreate, PerformancePublic
+from elums.schemas.performances import PerformanceComplete, PerformanceCreate, PerformancePublic
 
 router = APIRouter(prefix="/performances", tags=["performances"])
 
@@ -151,6 +152,7 @@ async def put_chunk(
 @router.post("/{performance_id}/complete", response_model=PerformancePublic)
 async def complete_performance(
     performance_id: str,
+    body: PerformanceComplete = PerformanceComplete(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     store: BlobStore = Depends(get_blob_store),
@@ -166,8 +168,14 @@ async def complete_performance(
     if chunk_count == 0:
         raise ApiError("no_chunks_uploaded", "No chunks were uploaded for this performance.", status_code=400)
 
+    # X0 (Oct 8): chunks are headerless 16-bit mono PCM (see
+    # elums/ingest/wav.py's docstring) — the total byte count is only
+    # known now, so the WAV header is built and prepended here rather
+    # than carried by chunk 0.
+    data_length = sum(_chunk_path(performance.id, i).stat().st_size for i in range(chunk_count))
     assembled_path = staging_dir / "assembled.audio"
     with assembled_path.open("wb") as out:
+        out.write(build_wav_header(body.sample_rate, data_length))
         for i in range(chunk_count):
             out.write(_chunk_path(performance.id, i).read_bytes())
 

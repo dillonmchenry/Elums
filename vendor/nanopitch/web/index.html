@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NanoPitch — Live Pitch Tracking</title>
+
+<!--
+  ============================================================================
+  NanoPitch: Live Pitch Tracking in the Browser
+  ============================================================================
+
+  This single-page application performs real-time monophonic pitch detection
+  entirely in the browser. It combines several key web technologies:
+
+    1. Web Audio API  - Captures live microphone input as PCM float samples
+    2. WebAssembly     - Runs a neural-network pitch tracker at native speed
+    3. Canvas 2D API   - Draws scrolling spectrograms and waveforms
+    4. Drag-and-Drop   - Lets users load trained model weights from a JSON file
+
+  The signal processing pipeline works as follows:
+    Mic -> AudioContext -> ScriptProcessorNode -> Resample to 16 kHz
+    -> Copy samples into WASM heap -> Call C inference function
+    -> Read results (VAD, mel, pitch posteriorgram, f0) from WASM heap
+    -> Visualize on canvas + update numeric meters
+
+  Key concepts you will see annotated below:
+    - How the browser's AudioContext manages real-time audio
+    - How ScriptProcessorNode gives us raw PCM sample buffers in JS
+    - How sample-rate conversion (resampling) works at the simplest level
+    - How JavaScript and WebAssembly share memory via typed arrays
+    - How 2D spectrograms are drawn pixel-by-pixel into ImageData
+    - How a polynomial approximation creates a viridis-like colormap
+  ============================================================================
+-->
+
+<style>
+  /* ---- CSS Custom Properties (Design Tokens) ----
+     These define the dark-theme color palette used throughout the UI.
+     The variable names are semantic: --bg for background, --surface for
+     panels, --accent for interactive highlights, etc. */
+  :root {
+    --bg: #0f0f14;
+    --surface: #1a1a24;
+    --border: #2a2a3a;
+    --text: #e0e0e8;
+    --dim: #888899;
+    --accent: #6c8cff;
+    --accent2: #ff6c8c;
+    --green: #4cda7c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.3rem; font-weight: 600; }
+  header .status { font-size: 0.85rem; color: var(--dim); }
+  header .status.ready { color: var(--green); }
+  .controls {
+    padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+  }
+  button {
+    padding: 0.5rem 1.2rem; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--surface); color: var(--text);
+    cursor: pointer; font-size: 0.9rem; transition: all 0.15s;
+  }
+  button:hover { border-color: var(--accent); background: #222233; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.active { border-color: var(--accent2); background: #2a1525; }
+  .drop-zone {
+    padding: 0.5rem 1.2rem; border: 2px dashed var(--border);
+    border-radius: 6px; color: var(--dim); font-size: 0.85rem;
+    cursor: pointer; transition: all 0.2s; min-width: 200px; text-align: center;
+  }
+  .drop-zone.dragover { border-color: var(--accent); background: #1a1a30; }
+  .drop-zone.loaded { border-color: var(--green); border-style: solid; color: var(--green); }
+  main {
+    flex: 1; padding: 1rem 1.5rem; display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    gap: 1rem; min-height: 0;
+  }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.75rem; overflow: hidden;
+  }
+  .panel h2 {
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--dim); margin-bottom: 0.5rem;
+  }
+  .viz-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+  /* "image-rendering: pixelated" is crucial for spectrograms -- it tells
+     the browser NOT to smooth/blur pixels when the canvas is scaled up.
+     Without this, the crisp per-pixel spectrogram would look blurry. */
+  canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  #mel-canvas { height: 120px; }
+  #pitch-canvas { height: 120px; }
+  #waveform-canvas { height: 60px; }
+  .meters {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+  }
+  .meter {
+    text-align: center; padding: 0.5rem;
+    background: var(--bg); border-radius: 6px;
+  }
+  .meter .value {
+    font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .meter .label { font-size: 0.75rem; color: var(--dim); margin-top: 0.25rem; }
+  .meter.vad .value { color: var(--green); }
+  .meter.pitch .value { color: var(--accent); }
+  .meter.note .value { color: var(--accent2); }
+  #rtf-canvas { height: 50px; }
+  #rtf-meter .value { color: var(--green); }
+  #rtf-meter.warn .value { color: #ffaa33; }
+  #rtf-meter.over .value { color: var(--accent2); }
+
+  @media (max-width: 700px) {
+    .viz-row { grid-template-columns: 1fr; }
+    header { flex-direction: column; align-items: flex-start; }
+    .controls { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================================================================
+     HTML STRUCTURE
+     ======================================================================
+     The UI has three main regions:
+       1. Header    - App title + status indicator (WASM loaded? model loaded?)
+       2. Controls  - Mic start/stop button, model drop zone, reset button
+       3. Main      - Waveform canvas, mel spectrogram canvas, pitch
+                      posteriorgram canvas, and numeric meters
+
+     The "drop zone" is an interactive area where users can drag-and-drop
+     a JSON file containing the trained NanoPitch neural network weights.
+     ====================================================================== -->
+
+<header>
+  <h1>NanoPitch</h1>
+  <span class="status" id="status">Loading WASM...</span>
+</header>
+
+<div class="controls">
+  <button id="btn-mic" disabled>Start Microphone</button>
+  <div class="drop-zone" id="drop-zone">Drop model JSON here</div>
+  <button id="btn-reset" disabled>Reset</button>
+</div>
+
+<main>
+  <!-- Waveform display: shows the amplitude envelope of incoming audio.
+       Green background shading indicates voice activity detection (VAD). -->
+  <div class="panel">
+    <h2>Waveform &amp; VAD</h2>
+    <canvas id="waveform-canvas"></canvas>
+  </div>
+
+  <div class="viz-row">
+    <!-- Log-Mel Spectrogram: a time-frequency representation of audio.
+         The neural network computes 40 mel-frequency bands per 10 ms frame.
+         Mel spacing approximates human pitch perception (logarithmic above
+         ~1 kHz). This is the primary input feature for the pitch model. -->
+    <div class="panel">
+      <h2>Log-Mel Spectrogram (40 bands)</h2>
+      <canvas id="mel-canvas"></canvas>
+    </div>
+
+    <!-- Pitch Posteriorgram: the neural network's output distribution over
+         360 pitch bins (one per 20-cent interval across the musical range).
+         Bright regions indicate the model's confidence that a particular
+         pitch is present. The final f0 estimate is decoded from this. -->
+    <div class="panel">
+      <h2>Pitch Posteriorgram (360 bins)</h2>
+      <canvas id="pitch-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Numeric meters showing instantaneous readings.
+       - Voice Activity: probability (0-100%) that speech/singing is present
+       - Pitch (Hz): the fundamental frequency estimate
+       - Note: the nearest MIDI note name + cents deviation (e.g. A4 +12c)
+       - Level (dB): RMS power of the current frame in decibels -->
+  <div class="panel">
+    <div class="meters">
+      <div class="meter vad">
+        <div class="value" id="vad-value">—</div>
+        <div class="label">Voice Activity</div>
+      </div>
+      <div class="meter pitch">
+        <div class="value" id="pitch-value">—</div>
+        <div class="label">Pitch (Hz)</div>
+      </div>
+      <div class="meter note">
+        <div class="value" id="note-value">—</div>
+        <div class="label">Note</div>
+      </div>
+      <div class="meter">
+        <div class="value" id="rms-value">—</div>
+        <div class="label">Level (dB)</div>
+      </div>
+      <div class="meter" id="rtf-meter">
+        <div class="value" id="rtf-value">—</div>
+        <div class="label">RTF</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Real-Time Factor (RTF) — inference time / audio time. Must be &lt; 1.0 for real-time.</h2>
+    <canvas id="rtf-canvas"></canvas>
+  </div>
+</main>
+
+<script>
+// ============================================================================
+// JAVASCRIPT — REAL-TIME PITCH TRACKING ENGINE
+// ============================================================================
+//
+// This script handles the full real-time pipeline:
+//   1. Load the WebAssembly (WASM) module compiled from C
+//   2. Accept a trained model's weights via drag-and-drop JSON file
+//   3. Capture live microphone audio through the Web Audio API
+//   4. Feed 10 ms audio frames into the WASM pitch detector
+//   5. Visualize the results (spectrogram, posteriorgram, waveform, meters)
+//
+// Dependencies:
+//   - nanopitch.js: The Emscripten-generated JS glue code that loads the
+//     .wasm binary and exposes C functions to JavaScript.
+// ============================================================================
+
+
+// ── Note Name Helper ────────────────────────────────────────────────────────
+// Converts a frequency in Hz to a musical note name with cents deviation.
+//
+// MUSIC THEORY CONTEXT:
+//   MIDI note 69 = A4 = 440 Hz (standard concert pitch).
+//   Each semitone is a factor of 2^(1/12) in frequency.
+//   The formula midi = 69 + 12 * log2(hz / 440) inverts this relationship.
+//   "Cents" are hundredths of a semitone -- a finer measure of pitch
+//   accuracy. A deviation of +50 cents means you're halfway to the next
+//   semitone (sharp); -50 cents means halfway to the one below (flat).
+// ─────────────────────────────────────────────────────────────────────────────
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function hzToNote(hz) {
+  if (hz <= 0) return '—';
+  // Convert frequency to a (possibly fractional) MIDI note number.
+  // MIDI 69 = A4 = 440 Hz. Each semitone = +1 MIDI number.
+  const midi = 69 + 12 * Math.log2(hz / 440);
+  // Round to the nearest integer MIDI note
+  const note = Math.round(midi);
+  // The fractional remainder, scaled to cents (hundredths of a semitone)
+  const cents = Math.round((midi - note) * 100);
+  // Map MIDI note number to note name. The modulo handles wrapping
+  // through the 12-note chromatic scale. The ((n % 12) + 12) % 12 idiom
+  // ensures a positive result even for negative MIDI numbers.
+  const name = NOTE_NAMES[((note % 12) + 12) % 12];
+  // MIDI octave: C4 is MIDI 60, so octave = floor(midi/12) - 1
+  const octave = Math.floor(note / 12) - 1;
+  const sign = cents >= 0 ? '+' : '';
+  return `${name}${octave} ${sign}${cents}¢`;
+}
+
+
+// ── Viridis Colormap Approximation ──────────────────────────────────────────
+//
+// WHAT IS A COLORMAP?
+//   A colormap maps a scalar value (0.0 to 1.0) to an RGB color.
+//   Scientific visualizations use colormaps to display 2D data (like
+//   spectrograms) where the value at each pixel encodes magnitude.
+//
+// WHY VIRIDIS?
+//   Viridis is a perceptually uniform colormap designed by scientists at
+//   matplotlib. "Perceptually uniform" means equal steps in data value
+//   produce equal steps in perceived brightness/color change -- unlike
+//   rainbow colormaps, which have misleading bright/dark bands. Viridis
+//   also works for colorblind viewers and prints well in grayscale.
+//
+// HOW THIS APPROXIMATION WORKS:
+//   The true viridis colormap is defined by a 256-entry lookup table.
+//   Here, each R/G/B channel is approximated by a cubic polynomial in t:
+//     channel(t) = a + b*t + c*t^2 + d*t^3
+//   The coefficients were fit to match the real viridis curve. The result
+//   goes from dark purple (t=0) through teal (t=0.5) to yellow (t=1.0).
+//   This saves us from shipping a 768-byte lookup table and is "close enough"
+//   for real-time visualization purposes.
+// ─────────────────────────────────────────────────────────────────────────────
+function viridis(t) {
+  // Clamp input to [0, 1]
+  t = Math.max(0, Math.min(1, t));
+  // Evaluate cubic polynomials for each channel, clamp to [0,1], scale to [0,255]
+  const r = Math.round(255 * Math.max(0, Math.min(1, -0.7 + 4.4*t - 4.1*t*t + 1.4*t*t*t)));
+  const g = Math.round(255 * Math.max(0, Math.min(1, -0.1 + 1.2*t + 0.5*t*t - 1.0*t*t*t)));
+  const b = Math.round(255 * Math.max(0, Math.min(1, 0.3 + 1.5*t - 3.2*t*t + 2.0*t*t*t)));
+  return [r, g, b];
+}
+
+
+// ── Application State ───────────────────────────────────────────────────────
+//
+// These variables track the runtime state of the application:
+//
+//   wasmModule   - The Emscripten module object. Once loaded, it exposes:
+//                    ._malloc(bytes)    -> allocate WASM heap memory
+//                    ._free(ptr)        -> free WASM heap memory
+//                    .HEAPF32           -> Float32Array view of WASM memory
+//                    ._nanopitch_*()    -> exported C functions
+//
+//   weightsPtr   - Pointer (integer offset) into WASM linear memory where
+//                  the loaded neural network weights reside.
+//
+//   statePtr     - Pointer to the GRU recurrent state in WASM memory.
+//                  The pitch model is recurrent (has memory of past frames),
+//                  so this state persists across audio frames.
+//
+//   audioCtx     - The Web Audio API AudioContext -- the central object that
+//                  manages all audio processing nodes and timing.
+//
+//   micStream    - The MediaStream from getUserMedia (the raw mic capture).
+//
+//   processorNode - The ScriptProcessorNode that gives us raw PCM samples.
+//
+//   isRunning    - Boolean flag: is the mic currently streaming?
+// ─────────────────────────────────────────────────────────────────────────────
+let wasmModule = null;
+let weightsPtr = null;
+let statePtr = null;
+let modelDataPtr = null;  // WASM heap buffer backing zero-copy weight views
+let loadedGruSize = 96;
+let audioCtx = null;
+let micStream = null;
+let processorNode = null;
+let isRunning = false;
+
+// ── Visualization History Buffers ───────────────────────────────────────────
+// We keep a rolling window of the last HISTORY frames for the scrolling
+// spectrogram displays. Each time a new frame arrives, we push it onto the
+// array and shift off the oldest entry, creating a scrolling effect.
+//
+//   melHistory   - Array of Float32Array(40), one per frame. Each holds
+//                  40 log-mel filter bank energies (the spectrogram rows).
+//   pitchHistory - Array of Float32Array(360), one per frame. Each holds
+//                  the pitch posteriorgram (probability over 360 pitch bins).
+//   waveHistory  - Array of Float32Array(160), raw 10ms audio chunks
+//                  used for the waveform envelope display.
+//   vadHistory   - Array of floats [0..1], voice activity probability
+//                  per frame. Used to shade the waveform background green
+//                  when voice is detected.
+// ─────────────────────────────────────────────────────────────────────────────
+const HISTORY = 300; // frames to show
+let melHistory = [];     // each: Float32Array(40)
+let rtfHistory = [];     // rolling RTF values for sparkline
+let pitchHistory = [];   // each: Float32Array(360)
+let waveHistory = [];    // raw audio chunks
+let vadHistory = [];
+
+
+// ── Canvas Setup Helper ─────────────────────────────────────────────────────
+// Sets the internal pixel dimensions of a canvas element.
+//
+// IMPORTANT DISTINCTION: A canvas has two sizes:
+//   1. CSS size (how large it appears on screen) -- set via CSS width/height
+//   2. Internal resolution (how many actual pixels it contains) -- set via
+//      canvas.width and canvas.height attributes
+//
+// For spectrograms, we set the internal resolution to exactly match our
+// data dimensions (e.g., 300 x 40 for 300 time frames x 40 mel bins).
+// The CSS then scales this up to fill the panel. Combined with
+// "image-rendering: pixelated", each data point maps to a crisp block of
+// screen pixels with no blurring.
+// ─────────────────────────────────────────────────────────────────────────────
+function setupCanvas(id, w, h) {
+  const canvas = document.getElementById(id);
+  canvas.width = w;
+  canvas.height = h;
+  return { canvas, ctx: canvas.getContext('2d') };
+}
+
+
+// ── Mel Spectrogram Visualization ───────────────────────────────────────────
+//
+// HOW SPECTROGRAM RENDERING WORKS:
+//   We create a raw ImageData object (an RGBA pixel buffer) and write color
+//   values directly into it -- one pixel per (time, frequency) pair. This is
+//   much faster than calling fillRect() for each pixel, because we do a
+//   single bulk transfer to the canvas via putImageData().
+//
+//   ImageData layout: a flat Uint8ClampedArray where every 4 consecutive
+//   bytes represent one pixel: [R, G, B, A, R, G, B, A, ...].
+//   Pixel at (x, y) starts at index (y * width + x) * 4.
+//
+//   The mel spectrogram has 40 frequency bands (rows) and HISTORY time
+//   steps (columns). We flip the y-axis (39-b) so low frequencies appear
+//   at the bottom, matching the convention in audio analysis.
+//
+//   The normalization "(value + 12) / 17" maps the typical log-mel energy
+//   range of roughly [-12, +5] to [0, 1] for the viridis colormap.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawMel(melHist) {
+  const { canvas, ctx } = setupCanvas('mel-canvas', HISTORY, 40);
+  // Create a blank RGBA pixel buffer matching the canvas dimensions
+  const img = ctx.createImageData(HISTORY, 40);
+  for (let t = 0; t < HISTORY; t++) {
+    const frame = melHist[t];
+    for (let b = 0; b < 40; b++) {
+      if (!frame) continue;
+      // Normalize log-mel energy to [0, 1]. Typical values range ~[-12, +5].
+      // (39 - b) flips the axis so low frequencies are at the bottom.
+      const val = (frame[39 - b] + 12) / 17;
+      const [r, g, bl] = viridis(val);
+      // Compute the byte offset into the RGBA pixel array
+      const idx = (b * HISTORY + t) * 4;
+      img.data[idx] = r; img.data[idx+1] = g;
+      img.data[idx+2] = bl; img.data[idx+3] = 255;
+    }
+  }
+  // Transfer the entire pixel buffer to the canvas in one operation
+  ctx.putImageData(img, 0, 0);
+}
+
+
+// ── Pitch Posteriorgram Visualization ───────────────────────────────────────
+//
+// The pitch posteriorgram is a 360-bin probability distribution output by
+// the neural network. Each bin covers a 20-cent interval, so 360 bins
+// span 360 * 20 = 7200 cents = 6 octaves of pitch range.
+//
+// We only display bins 60-240 (the most musically relevant range,
+// roughly covering vocal and most instrument fundamentals). These 180
+// data bins are mapped onto 120 display rows via nearest-neighbor
+// sampling (Math.floor(row * N_SHOW / 120)).
+//
+// The "*2" in "viridis(val * 2)" amplifies the contrast -- posteriorgram
+// values are probabilities that often peak well below 1.0, so doubling
+// them before color mapping makes the peaks more visible.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawPitch(pitchHist) {
+  const { canvas, ctx } = setupCanvas('pitch-canvas', HISTORY, 120);
+  const img = ctx.createImageData(HISTORY, 120);
+  // Show only the musically relevant subset of the 360 bins
+  const BIN_START = 60, BIN_END = 240;
+  const N_SHOW = BIN_END - BIN_START;
+  for (let t = 0; t < HISTORY; t++) {
+    const frame = pitchHist[t];
+    for (let row = 0; row < 120; row++) {
+      if (!frame) continue;
+      // Map display row to data bin (nearest-neighbor resampling)
+      const bin = BIN_START + Math.floor(row * N_SHOW / 120);
+      // Flip vertically so low pitches are at the bottom
+      const val = frame[BIN_END - 1 - (bin - BIN_START)];
+      // Multiply by 2 for contrast enhancement before colormap lookup
+      const [r, g, bl] = viridis(val * 2);
+      const idx = (row * HISTORY + t) * 4;
+      img.data[idx] = r; img.data[idx+1] = g;
+      img.data[idx+2] = bl; img.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+
+// ── Waveform + VAD Visualization ────────────────────────────────────────────
+//
+// This draws two layers:
+//   1. VAD background shading: green-tinted rectangles behind time regions
+//      where voice activity probability exceeds 0.3 (30%). The alpha
+//      (opacity) is proportional to the VAD confidence (vad * 0.15),
+//      so stronger voice activity shows brighter green.
+//
+//   2. Waveform envelope: for each 10ms chunk, we find the maximum absolute
+//      sample value (the peak amplitude) and draw a vertical line from
+//      -peak to +peak centered on the canvas midline. This creates an
+//      amplitude envelope display similar to what you see in a DAW.
+//
+// Unlike the spectrograms (which use per-pixel ImageData), the waveform
+// uses the Canvas 2D drawing API (fillRect for VAD, moveTo/lineTo for
+// the waveform lines). This is appropriate here because we are drawing
+// geometric shapes rather than a dense pixel grid.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawWaveform(waveHist, vadHist) {
+  // Each frame gets 4 horizontal pixels for better visual resolution
+  const { canvas, ctx } = setupCanvas('waveform-canvas', HISTORY * 4, 60);
+  // Clear to background color
+  ctx.fillStyle = '#0f0f14';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Layer 1: Draw VAD background shading
+  for (let t = 0; t < HISTORY; t++) {
+    const vad = vadHist[t] || 0;
+    if (vad > 0.3) {
+      // Semi-transparent green; more opaque = higher VAD confidence
+      ctx.fillStyle = `rgba(76, 218, 124, ${vad * 0.15})`;
+      ctx.fillRect(t * 4, 0, 4, canvas.height);
+    }
+  }
+
+  // Layer 2: Draw waveform amplitude envelope
+  ctx.strokeStyle = '#6c8cff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const mid = canvas.height / 2;
+  for (let t = 0; t < HISTORY; t++) {
+    const chunk = waveHist[t];
+    if (!chunk) continue;
+    // Find the peak absolute amplitude in this 10ms chunk
+    let maxVal = 0;
+    for (let i = 0; i < chunk.length; i++) {
+      const a = Math.abs(chunk[i]);
+      if (a > maxVal) maxVal = a;
+    }
+    // Draw a vertical line from -peak to +peak, centered at midline.
+    // The 0.9 factor leaves a small margin so full-scale doesn't clip.
+    const y = mid - maxVal * mid * 0.9;
+    const y2 = mid + maxVal * mid * 0.9;
+    ctx.moveTo(t * 4 + 2, y);
+    ctx.lineTo(t * 4 + 2, y2);
+  }
+  // Render all the line segments in one draw call (batched for performance)
+  ctx.stroke();
+}
+
+
+// ── Meter Display Update ────────────────────────────────────────────────────
+//
+// Updates the four numeric readout panels:
+//
+//   VAD (Voice Activity Detection):
+//     Shows the probability (0-100%) that the current frame contains
+//     voiced speech or singing. The neural network outputs this as a
+//     single float in [0, 1]. Values below 1% display as "---" (silence).
+//
+//   Pitch (Hz):
+//     The estimated fundamental frequency (f0) in Hertz. This is decoded
+//     from the pitch posteriorgram, typically via weighted average or
+//     argmax of the 360-bin distribution. Shows "---" when no pitch is detected.
+//
+//   Note:
+//     The nearest musical note name plus cents deviation, computed by
+//     the hzToNote() function above. E.g., "A4 +5c" means 5 cents
+//     sharp of concert A (440 Hz).
+//
+//   Level (dB):
+//     RMS (root-mean-square) power in decibels, computed from the raw
+//     PCM samples: dB = 10 * log10(mean of squared samples).
+//     Values below -80 dB are treated as silence.
+// ─────────────────────────────────────────────────────────────────────────────
+function updateMeters(output) {
+  document.getElementById('vad-value').textContent =
+    output.vad > 0.01 ? (output.vad * 100).toFixed(0) + '%' : '—';
+  document.getElementById('pitch-value').textContent =
+    output.f0 > 0 ? output.f0.toFixed(1) : '—';
+  document.getElementById('note-value').textContent = hzToNote(output.f0);
+  document.getElementById('rms-value').textContent =
+    output.rmsDb > -80 ? output.rmsDb.toFixed(0) : '—';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Real-Time Factor (RTF) visualization
+//
+// RTF = inference_time / audio_time.
+//   RTF < 1.0 → model runs faster than real-time (good)
+//   RTF = 1.0 → barely keeping up
+//   RTF > 1.0 → too slow, frames will be dropped
+//
+// Each audio frame is 10ms. If inference takes 3ms, RTF = 0.3.
+// The sparkline shows RTF over time so you can see how model size
+// affects real-time performance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function drawRtf(rtfHist) {
+  const canvas = document.getElementById('rtf-canvas');
+  const W = HISTORY * 2;
+  const H = 50;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#0f0f14';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw RTF = 1.0 threshold line (the "real-time" boundary)
+  const yThresh = H - (1.0 / 2.0) * H;  // scale: 0-2.0 maps to canvas
+  ctx.strokeStyle = '#553333';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, yThresh);
+  ctx.lineTo(W, yThresh);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Label
+  ctx.fillStyle = '#666';
+  ctx.font = '10px monospace';
+  ctx.fillText('RTF=1.0', 4, yThresh - 3);
+
+  if (rtfHist.length < 2) return;
+
+  // Draw RTF sparkline
+  ctx.beginPath();
+  for (let i = 0; i < rtfHist.length; i++) {
+    const x = (i / HISTORY) * W;
+    const rtf = Math.min(rtfHist[i], 2.0);  // clamp display at 2.0
+    const y = H - (rtf / 2.0) * H;
+
+    // Color: green if < 0.5, yellow if 0.5-1.0, red if > 1.0
+    if (i > 0) ctx.stroke();
+    ctx.beginPath();
+    ctx.strokeStyle = rtf < 0.5 ? '#4cda7c' : rtf < 1.0 ? '#ffaa33' : '#ff6c8c';
+    ctx.lineWidth = 1.5;
+    if (i === 0) ctx.moveTo(x, y);
+    else { ctx.moveTo((((i-1) / HISTORY) * W), H - (Math.min(rtfHist[i-1], 2.0) / 2.0) * H); ctx.lineTo(x, y); }
+  }
+  ctx.stroke();
+}
+
+function updateRtfMeter(rtfHist) {
+  if (rtfHist.length < 10) return;
+  // Average over last 30 frames (~300ms)
+  const recent = rtfHist.slice(-30);
+  const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const el = document.getElementById('rtf-value');
+  const meter = document.getElementById('rtf-meter');
+  el.textContent = avg.toFixed(2);
+
+  // Color code: green < 0.5, yellow 0.5-1.0, red > 1.0
+  meter.className = 'meter' + (avg < 0.5 ? '' : avg < 1.0 ? ' warn' : ' over');
+
+  // Also update status bar if too slow
+  if (avg > 1.0) {
+    const status = document.getElementById('status');
+    status.textContent = 'Model too slow for real-time! Try a smaller --gru-size.';
+    status.className = 'status';
+  }
+}
+
+
+// ── Audio Frame Processing (JS <-> WASM Bridge) ────────────────────────────
+//
+// FRAME_SIZE = 160 samples at 16 kHz = 10 ms of audio.
+// This is the hop size of the pitch model: every 10 ms, we feed one frame
+// of audio into the neural network and get back one set of predictions.
+//
+// HOW JS AND WASM SHARE MEMORY:
+// ──────────────────────────────
+// WebAssembly has a single contiguous block of "linear memory" (like a C
+// program's heap). Emscripten exposes this as an ArrayBuffer, and provides
+// typed array views into it:
+//
+//   wasmModule.HEAPF32  -- a Float32Array view of the entire WASM memory
+//   wasmModule.HEAPU8   -- a Uint8Array view (same memory, byte-level)
+//
+// To pass data from JS to a WASM C function, we:
+//   1. Call _malloc(numBytes) to allocate space in WASM memory.
+//      This returns a byte offset (pointer) into the linear memory.
+//   2. Write our JS data into the HEAPF32 view at that offset.
+//      Because HEAPF32 is a Float32Array (4 bytes per element), we
+//      divide the byte pointer by 4 to get the float index: ptr >> 2.
+//   3. Pass the pointer to the C function, which sees it as a float*.
+//   4. After the C function returns, read results from HEAPF32.
+//   5. Call _free(ptr) to release the WASM memory.
+//
+// IMPORTANT: The typed array views (HEAPF32 etc.) can become detached if
+// WASM memory grows (e.g., during a malloc). Always re-read the view after
+// any call that might allocate. In this code, we read results immediately
+// after the processing call and copy them out before freeing.
+//
+// THE OUTPUT STRUCT LAYOUT:
+// ─────────────────────────
+// The C function nanopitch_process_frame() fills an output buffer with:
+//   [0]       = VAD probability        (1 float)
+//   [1..360]  = pitch posteriorgram    (360 floats)
+//   [361]     = f0 in Hz               (1 float)
+//   [362..401]= log-mel features       (40 floats)
+//   Total: 402 floats = 1608 bytes
+// ─────────────────────────────────────────────────────────────────────────────
+const FRAME_SIZE = 160; // 10ms at 16kHz
+
+function processAudioFrame(samples) {
+  // Guard: do nothing if WASM module or model weights aren't loaded yet
+  if (!wasmModule || !weightsPtr || !statePtr) return null;
+
+  // Step 1: Allocate space for input samples in WASM linear memory.
+  // FRAME_SIZE floats * 4 bytes per float = 640 bytes.
+  const inputPtr = wasmModule._malloc(FRAME_SIZE * 4);
+
+  // Step 2: Copy the JavaScript Float32Array samples into WASM memory.
+  // "inputPtr >> 2" converts a byte offset to a float32 index, because
+  // HEAPF32 is indexed by float position, not byte position.
+  // (Bit-shifting right by 2 is equivalent to dividing by 4.)
+  for (let i = 0; i < FRAME_SIZE; i++) {
+    wasmModule.HEAPF32[(inputPtr >> 2) + i] = samples[i] || 0;
+  }
+
+  // Step 3: Allocate space for the output struct in WASM memory.
+  // NanoPitchOutput: vad(1) + pitch(360) + f0(1) + mel(40) = 402 floats
+  const outSize = (1 + 360 + 1 + 40) * 4;
+  const outPtr = wasmModule._malloc(outSize);
+
+  // Step 4: Call the C inference function via its Emscripten-exported name.
+  // In C this was declared something like:
+  //   int nanopitch_process_frame(Weights* w, State* s, float* in, float* out);
+  // Emscripten prefixes exported C functions with "_".
+  const valid = wasmModule._nanopitch_process_frame(weightsPtr, statePtr, inputPtr, outPtr);
+
+  let result = null;
+  if (valid) {
+    // Step 5: Read results from WASM memory via the HEAPF32 view.
+    // "outPtr >> 2" converts the byte pointer to a float32 index.
+    const base = outPtr >> 2;
+    result = {
+      vad: wasmModule.HEAPF32[base],
+      // Create a Float32Array *view* into WASM memory (zero-copy).
+      // The constructor signature is: new Float32Array(buffer, byteOffset, length)
+      pitch: new Float32Array(wasmModule.HEAPF32.buffer, outPtr + 1 * 4, 360),
+      f0: wasmModule.HEAPF32[base + 361],
+      mel: new Float32Array(wasmModule.HEAPF32.buffer, outPtr + 362 * 4, 40),
+    };
+
+    // CRITICAL: Copy the arrays out of WASM memory before freeing!
+    // The views created above point directly into the WASM ArrayBuffer.
+    // After _free(), that memory may be reused, corrupting our data.
+    // "new Float32Array(view)" creates an independent copy in JS heap.
+    result.pitch = new Float32Array(result.pitch);
+    result.mel = new Float32Array(result.mel);
+
+    // Compute RMS (Root Mean Square) level in decibels.
+    // RMS = sqrt(mean(samples^2)). In dB: 10 * log10(mean(samples^2)).
+    // The +1e-10 prevents log10(0) = -Infinity for silent frames.
+    let sumSq = 0;
+    for (let i = 0; i < FRAME_SIZE; i++) sumSq += samples[i] * samples[i];
+    result.rmsDb = 10 * Math.log10(sumSq / FRAME_SIZE + 1e-10);
+  }
+
+  // Step 6: Free the WASM heap allocations to avoid memory leaks.
+  // WASM memory is NOT garbage collected -- you must free manually.
+  wasmModule._free(inputPtr);
+  wasmModule._free(outPtr);
+  return result;
+}
+
+
+// ── Microphone Capture via Web Audio API ────────────────────────────────────
+//
+// HOW WEB AUDIO CAPTURES MICROPHONE INPUT:
+// ─────────────────────────────────────────
+// The Web Audio API is a graph-based audio processing system built into
+// modern browsers. Audio flows through a directed graph of "nodes":
+//
+//   [MediaStreamSource] ──> [ScriptProcessorNode] ──> [Destination]
+//         (mic)                (our callback)          (speakers, muted)
+//
+// Step-by-step:
+//
+// 1. CREATE AN AudioContext:
+//    AudioContext is the central controller for all Web Audio operations.
+//    It owns the audio thread, manages timing, and creates nodes.
+//    We request sampleRate: 16000, but browsers may ignore this and use
+//    their hardware default (often 44100 or 48000 Hz).
+//
+// 2. GET MICROPHONE ACCESS:
+//    navigator.mediaDevices.getUserMedia() prompts the user for mic
+//    permission and returns a MediaStream. We request specific constraints
+//    (mono, no echo cancellation / noise suppression) to get the cleanest
+//    possible signal for pitch detection. Echo cancellation in particular
+//    can distort harmonics and hurt pitch accuracy.
+//
+// 3. CREATE A MediaStreamSource NODE:
+//    This node wraps the mic's MediaStream so it can feed into the
+//    Web Audio graph. It outputs the mic's PCM audio as floating-point
+//    samples in the range [-1.0, +1.0].
+//
+// 4. CREATE A ScriptProcessorNode:
+//    This gives us a JavaScript callback (onaudioprocess) that fires
+//    every time a buffer of audio samples is ready. The buffer size is
+//    FRAME_SIZE (160 samples). Each callback gives us an AudioBuffer
+//    containing the raw PCM data.
+//
+//    NOTE: ScriptProcessorNode is officially deprecated in favor of
+//    AudioWorklet (which runs in a separate thread for lower latency).
+//    However, ScriptProcessorNode works in all browsers including older
+//    ones, while AudioWorklet requires a separate .js file served over
+//    HTTPS. For a teaching tool, ScriptProcessorNode is simpler.
+//
+// 5. CONNECT THE GRAPH:
+//    source.connect(processor) -> processor.connect(destination)
+//    The final connection to destination is required even though we don't
+//    want playback -- without it, some browsers won't drive the graph.
+//
+// HOW RESAMPLING WORKS:
+// ─────────────────────
+// The pitch model expects audio at 16 kHz (16000 samples per second).
+// Most computer sound cards run at 44100 or 48000 Hz. If we can't get
+// 16 kHz natively, we must downsample.
+//
+// This code uses the simplest possible method: nearest-neighbor resampling.
+// For each target sample i (at 16 kHz), we compute which source sample
+// (at the browser's sample rate) is closest:
+//   srcIdx = floor(i * (browserRate / 16000))
+//
+// For example, at 48 kHz: ratio = 3.0, so target sample 0 reads source
+// sample 0, target sample 1 reads source sample 3, etc.
+//
+// This is NOT ideal -- proper resampling should use a low-pass filter
+// to prevent aliasing. But for speech/singing pitch detection at 16 kHz,
+// the difference is negligible because most pitch information is well
+// below the 8 kHz Nyquist frequency of the target rate.
+// ─────────────────────────────────────────────────────────────────────────────
+async function startMic() {
+  // Toggle behavior: if already running, stop instead
+  if (isRunning) { stopMic(); return; }
+
+  // Create an AudioContext. We request 16 kHz but the browser may
+  // give us a different rate (e.g., 44100 or 48000).
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+
+  // Request microphone access with constraints optimized for pitch tracking.
+  // echoCancellation:false and noiseSuppression:false preserve the natural
+  // signal, which is critical for accurate harmonic analysis.
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: false, noiseSuppression: false }
+  });
+
+  // Wrap the mic stream as a Web Audio source node
+  const source = audioCtx.createMediaStreamSource(micStream);
+
+  // ScriptProcessorNode requires a power-of-2 buffer size. We use 512
+  // and accumulate samples into 160-sample frames for the WASM inference.
+  const SCRIPT_BUF = 512;
+  processorNode = audioCtx.createScriptProcessor(SCRIPT_BUF, 1, 1);
+  let frameCounter = 0;
+  let resampleBuf = new Float32Array(0); // accumulator for resampled samples
+
+  processorNode.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+
+    // Resample the entire chunk from native rate to 16 kHz
+    let resampled;
+    if (audioCtx.sampleRate !== 16000) {
+      const ratio = audioCtx.sampleRate / 16000;
+      const outLen = Math.floor(input.length / ratio);
+      resampled = new Float32Array(outLen);
+      for (let i = 0; i < outLen; i++) {
+        const srcIdx = Math.floor(i * ratio);
+        resampled[i] = srcIdx < input.length ? input[srcIdx] : 0;
+      }
+    } else {
+      resampled = input;
+    }
+
+    // Append resampled audio to the accumulator
+    const newBuf = new Float32Array(resampleBuf.length + resampled.length);
+    newBuf.set(resampleBuf);
+    newBuf.set(resampled, resampleBuf.length);
+    resampleBuf = newBuf;
+
+    // Process as many complete 160-sample frames as available
+    while (resampleBuf.length >= FRAME_SIZE) {
+      const samples = resampleBuf.subarray(0, FRAME_SIZE);
+
+      const t0 = performance.now();
+      const result = processAudioFrame(samples);
+      const inferMs = performance.now() - t0;
+      const rtf = inferMs / 10.0;
+
+      rtfHistory.push(rtf);
+      while (rtfHistory.length > HISTORY) rtfHistory.shift();
+
+      if (result) {
+        melHistory.push(result.mel);
+        pitchHistory.push(result.pitch);
+        vadHistory.push(result.vad);
+      } else {
+        melHistory.push(null);
+        pitchHistory.push(null);
+        vadHistory.push(0);
+      }
+      waveHistory.push(new Float32Array(samples));
+
+      while (melHistory.length > HISTORY) melHistory.shift();
+      while (pitchHistory.length > HISTORY) pitchHistory.shift();
+      while (waveHistory.length > HISTORY) waveHistory.shift();
+      while (vadHistory.length > HISTORY) vadHistory.shift();
+
+      frameCounter++;
+      if (frameCounter % 3 === 0) {
+        drawMel(melHistory);
+        drawPitch(pitchHistory);
+        drawWaveform(waveHistory, vadHistory);
+        drawRtf(rtfHistory);
+        if (result) updateMeters(result);
+        updateRtfMeter(rtfHistory);
+      }
+
+      // Advance past the consumed frame
+      resampleBuf = resampleBuf.slice(FRAME_SIZE);
+    }
+  };
+
+  // Connect the audio graph: mic -> processor -> destination
+  // (destination connection is required for the graph to process)
+  source.connect(processorNode);
+  processorNode.connect(audioCtx.destination);
+  isRunning = true;
+
+  document.getElementById('btn-mic').textContent = 'Stop Microphone';
+  document.getElementById('btn-mic').classList.add('active');
+}
+
+// ── Stop Microphone ─────────────────────────────────────────────────────────
+// Tears down the entire audio pipeline in reverse order:
+//   1. Disconnect the processor node from the audio graph
+//   2. Stop all media tracks (releases the mic hardware)
+//   3. Close the AudioContext (frees audio thread resources)
+// Each step checks for null because the user might stop before
+// everything was fully initialized.
+// ─────────────────────────────────────────────────────────────────────────────
+function stopMic() {
+  if (processorNode) { processorNode.disconnect(); processorNode = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  isRunning = false;
+
+  document.getElementById('btn-mic').textContent = 'Start Microphone';
+  document.getElementById('btn-mic').classList.remove('active');
+}
+
+
+// ── Model Weight Loading from JSON ──────────────────────────────────────────
+//
+// HOW NEURAL NETWORK WEIGHTS GET INTO WASM:
+// ──────────────────────────────────────────
+// The trained NanoPitch model's weights are exported as a flat JSON array.
+// This function:
+//   1. Parses the JSON to get the weight values and model hyperparameters
+//   2. Allocates WASM heap memory for the weights (n floats * 4 bytes)
+//   3. Copies each weight from JS into the WASM HEAPF32 view
+//   4. Calls the C function _nanopitch_load_weights() which takes the raw
+//      float array and organizes it into the model's weight struct
+//   5. Creates the recurrent state buffer via _nanopitch_create_state()
+//
+// The JSON format contains:
+//   { "n_weights": <int>, "weights": [<float>, ...],
+//     "cond_size": <int>, "gru_size": <int> }
+//
+// After loading, the model is ready for real-time inference.
+// ─────────────────────────────────────────────────────────────────────────────
+function loadModelJSON(jsonData) {
+  if (!wasmModule) {
+    console.warn('Model load attempted before WASM runtime was initialized.');
+    setStatus('WASM runtime is not available — build and load WASM first', false);
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(jsonData);
+  } catch (err) {
+    console.warn('Failed to parse model JSON:', err);
+    setStatus('Invalid model JSON (parse error)', false);
+    alert('Invalid model JSON: could not parse file');
+    return;
+  }
+  if (!Array.isArray(data.weights) || data.weights.length === 0) {
+    console.warn('Invalid model JSON: missing or empty weights array.');
+    alert('Invalid model JSON: missing non-empty "weights" array');
+    return;
+  }
+
+  const n = data.n_weights || data.weights.length;
+  const condSize = data.cond_size || 64;
+  const gruSize = data.gru_size || 96;
+  if (n > data.weights.length) {
+    console.warn('Invalid model JSON: n_weights exceeds weights length.');
+    alert('Invalid model JSON: n_weights exceeds weights length');
+    return;
+  }
+  if (n !== data.weights.length) {
+    console.warn(
+      `Model JSON metadata mismatch: n_weights=${n}, actual weights=${data.weights.length}. ` +
+      'Proceeding with n_weights value.'
+    );
+  }
+
+  // Allocate WASM memory for the flat weight array and copy values in.
+  // Same pattern as processAudioFrame: malloc -> write to HEAPF32 -> call C.
+  const ptr = wasmModule._malloc(n * 4);
+  for (let i = 0; i < n; i++) {
+    wasmModule.HEAPF32[(ptr >> 2) + i] = data.weights[i];
+  }
+
+  // Free any previously loaded weights, then tell C to parse the flat
+  // array into the model's structured weight format.
+  if (statePtr) {
+    wasmModule._nanopitch_free_state(statePtr);
+    statePtr = null;
+  }
+  if (weightsPtr) wasmModule._nanopitch_free_weights(weightsPtr);
+  weightsPtr = null;
+  if (modelDataPtr) wasmModule._free(modelDataPtr);
+  modelDataPtr = null;
+
+  weightsPtr = wasmModule._nanopitch_load_weights(ptr, n, condSize, gruSize);
+
+  // Create (or recreate) the GRU recurrent hidden state.
+  // This is zeroed out and will accumulate temporal context as frames
+  // are processed -- the GRU "remembers" recent audio to improve accuracy.
+  if (weightsPtr) {
+    modelDataPtr = ptr; // must stay alive: C keeps zero-copy pointers into this buffer
+    statePtr = wasmModule._nanopitch_create_state(gruSize);
+  } else {
+    wasmModule._free(ptr);
+  }
+
+  if (weightsPtr && statePtr) {
+    loadedGruSize = gruSize;
+    document.getElementById('drop-zone').textContent =
+      `Model loaded (${(n * 4 / 1024).toFixed(0)} KB)`;
+    document.getElementById('drop-zone').classList.add('loaded');
+    document.getElementById('btn-mic').disabled = false;
+    setStatus('Model loaded — ready', true);
+  } else {
+    if (weightsPtr) wasmModule._nanopitch_free_weights(weightsPtr);
+    weightsPtr = null;
+    if (modelDataPtr) wasmModule._free(modelDataPtr);
+    modelDataPtr = null;
+    alert('Failed to load model weights');
+  }
+}
+
+
+// ── Drag-and-Drop + Click-to-Browse File Loading ────────────────────────────
+//
+// HOW DRAG-AND-DROP WORKS IN THE BROWSER:
+// ────────────────────────────────────────
+// The HTML Drag and Drop API uses a series of events:
+//
+//   dragover  - Fires continuously while a file hovers over the drop zone.
+//               We must call e.preventDefault() to signal that we accept
+//               the drop (the browser default is to reject it).
+//
+//   dragleave - Fires when the dragged item leaves the drop zone. We use
+//               this to remove the visual highlight.
+//
+//   drop      - Fires when the user releases the file over the zone.
+//               e.dataTransfer.files gives us the File object(s).
+//               We read the file contents using FileReader.readAsText().
+//
+// We also handle click-to-browse as a fallback: clicking the zone creates
+// a temporary <input type="file"> element, triggers its click, and reads
+// the selected file. This is a common pattern because <input type="file">
+// is the standard way to open a file picker, but it is not styleable --
+// so we hide it and use a styled div as the visible trigger.
+//
+// FileReader is the browser API for reading local files. It is asynchronous:
+//   reader.readAsText(file)    -- starts reading
+//   reader.onload = callback   -- fires when done, with result in ev.target.result
+// ─────────────────────────────────────────────────────────────────────────────
+function setupDragDrop() {
+  const zone = document.getElementById('drop-zone');
+
+  // Click-to-browse: create a hidden file input and programmatically click it
+  zone.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => loadModelJSON(ev.target.result);
+      reader.readAsText(e.target.files[0]);
+    };
+    input.click();
+  });
+
+  // Drag-over: must preventDefault to allow dropping
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  // Drag-leave: remove visual highlight
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  // Drop: read the dropped file
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => loadModelJSON(ev.target.result);
+      reader.readAsText(file);
+    }
+  });
+}
+
+
+// ── Initialization ──────────────────────────────────────────────────────────
+//
+// HOW WASM MODULES ARE LOADED FROM JAVASCRIPT:
+// ─────────────────────────────────────────────
+// Emscripten (the C-to-WASM compiler) generates two files:
+//   1. nanopitch.js   - JavaScript "glue code" that handles loading
+//   2. nanopitch.wasm - The compiled WebAssembly binary
+//
+// The loading sequence is:
+//   a. We dynamically create a <script> tag pointing to nanopitch.js
+//   b. When that script loads, it defines a global factory function
+//      called NanoPitchModule (the name matches the Emscripten build)
+//   c. We call NanoPitchModule() which returns a Promise that resolves
+//      once the .wasm binary has been fetched, compiled, and instantiated
+//   d. The resolved module object gives us:
+//        ._malloc()/_free()           - heap memory management
+//        .HEAPF32/.HEAPU8/etc.        - typed array views of WASM memory
+//        ._nanopitch_process_frame()  - exported C functions (prefixed with _)
+//
+// WHY DYNAMIC SCRIPT LOADING?
+//   We load nanopitch.js dynamically (rather than with a static <script>
+//   tag) so we can gracefully handle the case where the WASM build hasn't
+//   been done yet -- the onerror callback shows a helpful message instead
+//   of a cryptic console error.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function setStatus(text, ready) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.className = 'status' + (ready ? ' ready' : '');
+}
+
+async function init() {
+  // Set up the drag-and-drop / click-to-browse model loading
+  setupDragDrop();
+
+  // Wire up the microphone start/stop button
+  document.getElementById('btn-mic').addEventListener('click', startMic);
+
+  // Wire up the reset button: clears the GRU state and all history buffers.
+  // Resetting the GRU state is like starting a fresh "listening session" --
+  // the model forgets any temporal context it had accumulated.
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    if (statePtr && wasmModule) {
+      wasmModule._nanopitch_reset_state(statePtr, loadedGruSize);
+    }
+    melHistory = []; pitchHistory = []; waveHistory = []; vadHistory = [];
+  });
+
+  // Check if the WASM glue script has defined the factory function.
+  // If nanopitch.js failed to load (e.g., not built yet), NanoPitchModule
+  // will be undefined and we show a helpful error message.
+  if (typeof NanoPitchModule === 'undefined') {
+    setStatus('WASM not found — build WASM first (see deployment/wasm/build.sh)', false);
+    document.getElementById('btn-mic').disabled = true;
+    return;
+  }
+
+  try {
+    // Call the Emscripten factory function. This:
+    //   1. Fetches nanopitch.wasm over HTTP
+    //   2. Compiles it via WebAssembly.instantiate()
+    //   3. Sets up the memory, table, and exported function bindings
+    //   4. Resolves the promise with the fully initialized module
+    wasmModule = await NanoPitchModule();
+    setStatus('WASM loaded — drop a model JSON file', false);
+    document.getElementById('btn-reset').disabled = false;
+  } catch (e) {
+    setStatus('WASM load failed: ' + e.message, false);
+  }
+}
+
+// ── Dynamic Script Loading ──────────────────────────────────────────────────
+// Create a <script> element to load the Emscripten-generated JS glue code.
+// script.onload fires once the JS has executed (defining NanoPitchModule).
+// script.onerror fires if the file is not found (WASM not built yet).
+// ─────────────────────────────────────────────────────────────────────────────
+const script = document.createElement('script');
+script.src = 'nanopitch.js';
+script.onload = init;
+script.onerror = () => {
+  setStatus('nanopitch.js not found — build WASM first (see deployment/wasm/build.sh)', false);
+};
+document.head.appendChild(script);
+</script>
+</body>
+</html>
