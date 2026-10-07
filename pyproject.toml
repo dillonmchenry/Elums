@@ -28,6 +28,11 @@ core = [
     # Core, not gpu-only — api/worker read song_embeddings too (Sunday's
     # recommender), even though only gpu-worker ever writes a vector.
     "pgvector==0.4.2",
+    # Fri Oct 9 (F4/F5): elums/coaching/config.py parses config/coaching.yaml
+    # (the coaching-engine's thresholds, config-as-data per §3 of the
+    # implementation plan). Core, not gpu-only -- the api process will also
+    # need it once cards are served over HTTP.
+    "pyyaml==6.0.3",
 ]
 
 # "app" stays torch-free so the api/worker image rebuilds fast on every
@@ -115,6 +120,24 @@ dev = [
     # deterministic segmentation on synthetic F0 arrays — numpy only, no
     # torch/librosa, same "deterministic layers only" precedent.
     "numpy==2.3.4",
+    # Fri Oct 9 (F4/F5): tests/test_coaching_algebra.py imports
+    # elums.coaching.config, which parses config/coaching.yaml on the
+    # host — same duplication reasoning as numpy/pyphen above (dev tests
+    # run outside any image, so every import they trigger needs its own
+    # explicit pin here too, not just in "core").
+    "pyyaml==6.0.3",
+    # elums/coaching/config.py imports pydantic.BaseModel directly
+    # (not just pydantic-settings' re-export) — explicit pin, same
+    # reasoning. elums/llm/client.py (F6) imports structlog and httpx
+    # directly too; httpx is already above, structlog needs its own
+    # pin. elums/llm/client.py also imports elums.config for the
+    # OpenRouter key, which pulls in pydantic-settings — first time a
+    # "dev"-only test (not test_auth.py's live-stack kind) has needed
+    # elums.config on the host rather than through the running app/
+    # worker images.
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "structlog==26.1.0",
     # For tests/test_auth.py's DB-level invariants (no plaintext token at
     # rest, exactly one session row per login, logout deletes the row) —
     # connects to the db:5433 host-port exposed for "ad-hoc psql" in

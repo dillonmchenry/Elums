@@ -1,0 +1,56 @@
+# Coaching thresholds -- config-as-data, Session B (F4/F5) of
+# IMPLEMENTATION_PLAN_2026-10-09.md, per §3's settled decision:
+# "Thresholds are config-as-data -- new config/coaching.yaml behind a
+# CoachingConfig. elums/config.py stays infrastructure-only."
+#
+# Loaded by elums/coaching/config.py's `CoachingConfig`. Every number
+# here is a claim-generation or selection threshold; nothing
+# machine-specific (paths, URLs, secrets) belongs in this file --
+# that is elums/config.py's job.
+
+# --- §6.2's own pitch bands, reused here as detector thresholds ---
+pitch_flat_cents_threshold: 25.0 # beyond -25c counts as a real flatness claim
+pitch_sharp_cents_threshold: 25.0 # beyond +25c counts as a real sharpness claim
+pitch_drift_cents_per_s_threshold: 15.0 # sustained drift, not just vibrato wobble
+
+# --- §6.2's timing band: ±50ms, late weighted harder ---
+timing_early_ms_threshold: 50.0
+timing_late_ms_threshold: 50.0
+timing_late_weight: 1.5 # a late arrival of the same magnitude counts as "more wrong"
+
+# --- §6.2's vibrato band: 4.5-6.5Hz is the "good" range, a band not a rule ---
+vibrato_band_min_hz: 4.5
+vibrato_band_max_hz: 6.5
+# §11.2(5)'s cross-check: suppress a DSP vibrato claim unless the
+# learned technique score agrees it's really vibrato.
+vibrato_technique_gate_threshold: 0.1
+
+# --- Loudness, always self-relative per §6.3 (never absolute SPL) ---
+loud_relative_db_threshold: 3.0
+quiet_relative_db_threshold: -3.0
+rms_delta_loud_db_threshold: 3.0 # vs. the reference, comparative claims only
+rms_delta_quiet_db_threshold: -3.0
+
+# --- Registration strain co-occurrence: "high note, sharp, loud" ---
+# A note counts as "high" if its target MIDI is at/above this
+# percentile of the take's own note range (self-relative, no absolute
+# vocal-range assumption).
+registration_strain_high_note_percentile: 75.0
+
+# --- Technique partition (F3) --------------------------------------------
+technique_label_present_threshold: 0.5 # matches partition_technique's own default
+
+# --- Formant / diction ----------------------------------------------------
+formant_instability_std_hz_threshold: 150.0
+formant_delta_worse_hz_threshold: 40.0 # comparative: user noticeably less stable than reference
+
+# --- Breath ----------------------------------------------------------------
+breath_decay_mismatch_db_per_s_threshold: -2.0
+
+# --- F5: evidence, confidence, selection ----------------------------------
+comparative_confidence_boost: 1.3 # §5.3's ×1.3 comparative boost
+min_confidence_to_surface: 0.35 # low-confidence suppression floor
+max_cards_per_type: 2
+max_cards_per_category: 3
+max_cards_total: 12
+guaranteed_affirming_cards: 1 # at least one "you did this well" card, if one exists

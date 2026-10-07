@@ -667,3 +667,235 @@ On `elums-vm`: cloned `NanoPitch` fresh at `init-run` into `/srv/NanoPitch` (the
 2. **Decide whether X1/iPad verification is worth chasing with real hardware**, or should be formally accepted as an out-of-scope limitation for this project's write-up — four consecutive days (3 through 6) have now shipped iOS-facing code with zero on-device verification.
 3. **Someone needs to babysit the VM training run and copy the checkpoint off** before the box recycles — this is a real, time-sensitive action item, not a nice-to-have.
 4. **If a real room/speaker setup becomes available**, X3's actual calibration and X4's on/off re-score comparison (§5/§7.3) are the two checks most worth spending that session time on, since both are fully built and only blocked on acoustic hardware, not code.
+
+
+## Friday Oct 9 — Day 7, Session A (early checks, F0 ablation launch, F1 reference-side, F2 four new dimensions, F3 technique wiring)
+
+Per `IMPLEMENTATION_PLAN_2026-10-09.md`'s split into three non-interleaved sessions, this entry covers **Session A only** (EC-0 through EC-4, F0, F1, F2, F3). Sessions B and C are separate, later chats.
+
+### 1. Milestone status
+
+| Milestone | Status | Notes |
+| --- | --- | --- |
+| EC-0 — launch VM technique-head training | **done** | `scripts/train_technique_head.py`, detached on `elums-vm`, survives SSH disconnect |
+| EC-1 — OpenRouter compliance | **PASS** | `scripts/ec1_openrouter_check.py`: HTTP 200, `reasoning_tokens=0`, schema-conformant, provider=Phala |
+| EC-2 — time-base consistency | **PASS** | `scripts/ec2_timebase_check.py`: 24521 frames @ 100Hz → 245.21s vs chart's 245.20s (gap 0.007s) |
+| EC-3 — inference granularity | **done (decision only)** | Per-frame training label, pooled to chart note windows at inference — already decided in the plan text, no code needed; implemented as designed in `elums/technique/infer.py`'s `pool_to_spans` |
+| EC-4 — VRAM headroom | **PASS** | `scripts/ec4_vram_check.py`: WavLM-large peak ~1.4GB standalone; confirmed again in the real pipeline at ~1.7GB (F0 frontend + Conformer head included) |
+| F0 — VM: technique head + ablation table | **in progress, not finished** | 4-config ablation (`layer4`, `layer4_plus_1`, `ssl_only`, `ssl_f0`) running on `elums-vm`; `layer4` finished (macro-F1 **0.3317**, well under the plan's ≥0.70 bar); 3 configs remain — see §4 |
+| F1 — reference-side measurement | **done, validated with a caveat** | `elums/scoring/reference.py` + `run_reference_measurement` task; backfilled 17 songs |
+| F2 — four new dimensions | **done, wired end-to-end** | `elums/coaching/dimensions/{breath,onset,formants,dynamics}.py`; unit-tested (17 tests) + wired into both `scoring/tasks.py` (take side) and `scoring/reference.py` (reference side) — see §3 for the wiring gap found and closed this session |
+| F3 — technique head wired into ingest + scoring | **done, validated on a dummy checkpoint** | `elums/technique/{model,resample,infer,tasks}.py`; real inference succeeded end-to-end after a root-cause fix (§4); real trained checkpoint not yet ready |
+
+### 2. EC-1/EC-2/EC-4 — clean passes, no caveats
+
+All three ran once and passed. EC-1's `response_format` JSON Schema, `reasoning:{enabled:false}`, and `provider:{require_parameters:true}` are exactly as the plan specifies; the live call confirmed `usage.completion_tokens_details.reasoning_tokens == 0` (the thing a model silently defaulting to `xhigh` reasoning would violate). EC-2 cross-checked `havent-met-you-yet.mp3`'s f0 blob length against the chart's own `duration_s`/note spans — 7ms of drift over 245s, well inside tolerance, and independently supports F1's `ref_pct_in_tune` caveat below (the timebase itself is not the problem). EC-4 was measured twice: standalone (1.39GB) and inside the real `run_technique_reference` pipeline (1.70GB, F0 frontend + Conformer head included) — both comfortably inside the one-stage-at-a-time VRAM ceiling the `gpu:separation` lock already enforces.
+
+### 3. F2's four dimensions — built, unit-tested, and (this session) actually wired into the frozen payload
+
+`elums/coaching/dimensions/{breath,onset,formants,dynamics}.py` were written per §6.4(a)'s table and validated two ways: 17 synthetic unit tests (`tests/test_coaching_dimensions.py`, all passing) and an eyeball check against a real separated vocal stem (`scripts/f2_eyeball_check.py`). The eyeball check found and fixed a real calibration bug: a hardcoded `floor_db=-60.0` ("true digital silence") made every onset read `"aspirate"` and over-fired breath events (159/track) on a real stem whose residual separation noise floor sits at -20 to -30dB. Fixed in two steps — `estimate_noise_floor_db()` using the track's own RMS percentile (first attempt still returned -60.0, because a long silent intro dominated the low percentile), then excluding true-silence-floor frames before taking that percentile (floor settled at -43.6dB, breath events dropped to 70, onset classification showed real variety instead of all-`"aspirate"`). Documented in the function's own docstring, not just here.
+
+**What was missing when this session's work was first drafted, and is now fixed**: the four dimension modules were complete and tested in isolation but **not called anywhere from `elums/scoring/tasks.py` or `elums/scoring/reference.py`** — a real gap against the exit contract ("the four new dimensions" are explicitly named as part of the frozen per-note payload). Closed this session:
+
+- `scoring/tasks.py`'s per-note loop now computes `onset_type`, `onset_rise_time_s`, `breath_ran_out_early`, `breath_decay_slope_db_per_s`, `dynamic_arc`, `formant_stability_std_hz`, `formant_std_hz_by_formant` for every note, using the note window itself as the "phrase"/"held vowel" span (the chart has no separate phrase-grouping concept — same granularity decision EC-3 already made for technique spans). A whole-take `breath_events` list (discrete event detection, not per-note) is a new top-level `analysis_payload` key, since that is the natural shape for discontinuous events.
+- `scoring/reference.py`'s `measure_reference` computes the matching `ref_onset_type`, `ref_dynamic_arc`, `ref_breath_ran_out_early`, `ref_breath_decay_slope_db_per_s`, `ref_formant_stability_std_hz`, `ref_formant_std_hz_by_formant` fields, now taking `audio`/`sample_rate` params (needed for formants, which are a spectral-envelope property not recoverable from f0/RMS). `run_reference_measurement` already loaded the vocals stem's raw audio for RMS, so this was a pass-through, not new I/O.
+- `scoring/tasks.py` adds `formant_std_delta_hz_by_formant` (via `compare_formant_consistency`) when both sides have formant data — DICTION's one comparative claim source, per §6.4's note that DICTION has no other feeder.
+- Re-validated end-to-end against real data (not just unit tests): re-ran `run_reference_measurement` on a real song (221 notes) — `onset_type`/`dynamic_arc` show real variety (`aspirate`/`balanced`/`glottal`, `flat`/`falling`/`rising`), `formant_stability_std_hz` plausible (Hz std in the few-hundred range). Re-ran `run_scoring` on a real performance end-to-end — the full note payload (37 keys) confirmed present with every field named above.
+
+**Caveat, honestly flagged, not swept aside**: `breath_ran_out_early` fired on 137/221 notes (62%) on the real song — plausible but almost certainly inflated, because treating each individual note (often under a second) as its own "phrase" means the function sees the natural tail-off before the *next* note's onset as "running out of breath," not a real end-of-phrase decay. A correct fix needs the chart's own phrase/line grouping (not present in the chart schema today) rather than the note grid. Flagged for Session B/C, not chased further this session — matches the plan's own validation bar for F2 ("plausible, imperfect — eyeball... not chased further" is explicitly sanctioned).
+
+### 4. F3 — a real root-cause bug found and fixed, not blindly retried
+
+First smoke test (dummy, randomly-initialized checkpoint, since the real one wasn't ready) failed with `CUDA driver error: device not ready`. A second attempt (after a worker restart) failed differently: `!handles_.at(i) INTERNAL ASSERT FAILED ... CUDACachingAllocator.cpp`. Per this session's own instruction ("after two unsuccessful fixes for the same failure, reassess the root cause"), stopped retrying and investigated instead of trying a third time blind.
+
+**Root cause, confirmed**: `elums/technique/infer.py`'s `_extract_ssl_layers` ran WavLM-large in a **single forward pass over the entire song** (minutes long). WavLM's self-attention is O(n²) in sequence length; the function's own calling pattern was copied from `scripts/cache_ssl_features.py`, which only ever processes few-second GTSinger training clips — a full song is 100-200x longer and the memory/compute blew up. Confirmed directly: forcing the same code onto CPU (`CUDA_VISIBLE_DEVICES=-1`) climbed to 92%+ of the container's 15GB RAM limit and was killed before finishing, which would never happen for a few-second clip. This explains both distinct CUDA-level errors as resource exhaustion manifesting through the driver/allocator, not a bug specific to either error message.
+
+**Fix**: chunked `_extract_ssl_layers` into bounded 20-second windows, concatenating frame-level hidden states — same per-frame output, bounded memory regardless of song length. Re-tested: `run_technique_reference` now succeeds cleanly (`vram_peak_mb=1697.8`, `pooled_count=221/221`, `duration_ms≈2800` on a warm model). Confirmed consistent across repeated runs (no flakiness) and inside the full `run_scoring` path (technique partition populated per note, matched/missed/user_added/both_absent per label).
+
+Still using the **dummy, randomly-initialized checkpoint** (`scripts/make_dummy_technique_checkpoint.py`), since the real trained one isn't ready — so the technique *scores* in today's validation are not meaningful (e.g. the matched/ref/user scores in the end-to-end test above are near-identical only because the take audio and reference audio in that smoke test were literally the same file). What's validated is the **plumbing**: inference runs, memory stays bounded, pooling/partition/section-density all produce correctly-shaped output, and the graceful-fallback path (`TechniqueInferenceError` → warning logged, ingest/scoring still succeeds) was exercised for real by the two original CUDA failures before the fix.
+
+**§11.2(5)'s cross-check (gate the DSP vibrato detector on learned vibrato score ≥ 0.1) is NOT yet wired** — `measure.py`'s vibrato detector only has the autocorrelation upgrade (see §5 below); the real checkpoint doesn't exist yet to gate against. Flagged for whichever session has the trained checkpoint.
+
+### 5. Autocorrelation vibrato detector (measure.py)
+
+Replaced the zero-crossing vibrato detector with autocorrelation: detrend → autocorrelate → normalize by lag-0 → search the 4-7Hz lag range → accept only if the peak clears a 0.4 threshold. `tests/test_scoring.py` (21 tests) still pass unchanged — this is a drop-in replacement behind the same `_detect_vibrato` signature.
+
+### 6. F0 — VM training, launched and progressing, not finished
+
+Confirmed the VM's prior training run (Day 6) was lost to a recycle, but critically the SSL feature cache (9.0GB) survived — this made F0 feasible within session time without re-caching from scratch for every config. Launched `scripts/train_technique_head.py --epochs 15 --batch-size 16` detached (`setsid ... & disown`), confirmed surviving an independent SSH session (PID 287046).
+
+As of this entry: F0 caching (4827 items) finished; the 4-config ablation is running. `layer4` finished first: **macro-F1 = 0.3317**, well under the plan's ≥0.70 bar, with per-label F1 ranging from 0.76 (`mix_tech`, the dominant class) down to 0.08 (`pharyngeal_tech`). This is a real, concerning number, not yet explained — three more configs remain (`layer4_plus_1`, `ssl_only`, `ssl_f0`), and the whole point of the ablation is to see whether F0 conditioning (the `ssl_f0` config) moves `vibrato_tech`/`glissando_tech` enough to matter. **Session B must check `results/technique_head_ablation.json` once all 4 configs finish** before concluding anything about whether the real checkpoint will clear the bar — one config finishing low is not the full picture.
+
+### 7. The frozen per-note analysis payload — Session A's exit contract
+
+`elums/scoring/tasks.py`'s per-performance `analysis_payload`, confirmed by direct inspection of a real scored performance's blob:
+
+**Top level**: `offset_s`, `voiced_overlap_s`, `octave_shift_semitones`, `has_reference_comparison`, `has_technique_comparison`, `technique_section_density`, `breath_events` (whole-take list, not per-note), `notes` (list, below).
+
+**Per note** (37 keys, confirmed present on a real scored note):
+
+- *W4's original fields*: `note_index`, `median_cents`, `pct_in_tune`, `drift_cents_per_s`, `voiced_coverage`, `mean_voicing_confidence`, `note_octave_offset`, `arrival_offset_ms`, `core_start_s`, `core_end_s`, `user_rms_db`, `user_rms_relative_db`, `vibrato_rate_hz`, `vibrato_extent_cents`, `scoop_cents`, `envelope_shape`
+- *F2's four new dimensions, take side*: `onset_type`, `onset_rise_time_s`, `breath_ran_out_early`, `breath_decay_slope_db_per_s`, `dynamic_arc`, `formant_stability_std_hz`, `formant_std_hz_by_formant`
+- *F1's `ref_*` fields* (present only when `has_reference_comparison`): `ref_scoop_cents`, `ref_vibrato_rate_hz`, `ref_vibrato_extent_cents`, `ref_envelope_shape`, `ref_rms_db`, `ref_rms_relative_db`, `ref_voiced_coverage`, `ref_onset_type`, `ref_dynamic_arc`, `ref_breath_ran_out_early`, `ref_breath_decay_slope_db_per_s`, `ref_formant_stability_std_hz`, `ref_formant_std_hz_by_formant`
+- *Comparative fields* (present only when both sides have data): `rms_delta_db`, `formant_std_delta_hz_by_formant`
+- *F3's technique partition* (present only when `has_technique_comparison`): `technique` — `{"status": "ok"|"missing_data", "per_label": {<6 labels>: {"partition": "matched"|"missed"|"user_added"|"both_absent", "user_score": float, "ref_score": float}}}`
+
+This is the contract Session B/C build against. Any change to this field list should be a deliberate decision, not an incidental refactor.
+
+### 8. Blockers
+
+- **None new.** The VM continues to lack Docker Engine (pre-existing, unrelated); training runs fine as a bare process.
+
+### 9. Loose ends carried forward
+
+- **F0's ablation is incomplete** — 1 of 4 configs done, result (0.3317 macro-F1) is below the plan's bar. Needs the other 3 configs' results before any conclusion.
+- **No real technique-head checkpoint exists yet** — F3's validation today used a dummy randomly-initialized one. The dummy checkpoint file (`models/technique/ssl_f0.pth` inside the container, from `scripts/make_dummy_technique_checkpoint.py`) must be replaced once training finishes, and `config/models.yaml` needs a registration entry (not yet added).
+- **§11.2(5)'s vibrato cross-check gate is not wired** — needs the real checkpoint to be meaningful.
+- **`breath_ran_out_early`'s 62% fire rate is likely inflated** — needs chart-level phrase/line grouping (not present in the chart schema) rather than treating each note as its own phrase. See §3.
+- **The VM training run needs babysitting and `best.pth`/the winning config's checkpoint copied off** before any recycle, same warning as every prior VM session.
+- **Day 6's carried items** (EC-4 mel-parity test, X4's server-side raw+cleaned storage, X1/iPad real-device verification, X3's real latency measurement) — untouched this session, out of Session A's scope.
+
+### 10. Decisions the next session needs
+
+1. **Check `results/technique_head_ablation.json` once all 4 VM configs finish.** If `ssl_f0` clears (or comes close to) the ≥0.70 bar, copy the checkpoint off the VM immediately (recycle risk), register it in `config/models.yaml`, place it at `models/technique/ssl_f0.pth`, and re-run F3's validation with real scores. If none of the 4 configs clear the bar, this needs an explicit decision: ship the head anyway with lowered expectations (documented honestly), or fall back to F3's own named degraded mode (absolute-basis cards only, no technique partition) as the shipped behavior rather than a worst-case fallback.
+2. **Decide whether to wire §11.2(5)'s vibrato-score cross-check** once a real checkpoint exists — low cost, was simply blocked on checkpoint availability today.
+3. **`breath_ran_out_early`'s phrase-vs-note granularity gap (§3/§9)** is worth a real fix if coaching cards built on top of it (Session B/C) would otherwise overstate how often users run out of breath.
+4. **The frozen field list in §7 is the contract** — Session B/C's coaching-card/claims layer should be built against exactly this, and any addition/removal should be a recorded decision here, not silent drift.
+
+### 11. ⚠️ Concurrent work notice — the technique head is being retrained WHILE Session B runs
+
+**Read this before building F4/F5/F6.** Session A's thread is continuing to experiment on the technique classifier (F0's model) in parallel with Session B, rather than handing off a final checkpoint. This is deliberate: the trained head missed its own validation bar (0.423 macro-F1 against a ≥0.70 target, §6), so it is being improved rather than accepted as-is. Session B does **not** need to wait, but it does need to know what is and is not stable underneath it.
+
+**What is stable — build freely against these.** The contract is at the **field-name** level, exactly as acceptance criterion #10 specifies ("Session B's algebra reads only fields from Session A's exit list"). None of the in-flight retraining work changes any name:
+
+- The six labels in `elums/technique/model.py`'s `TECHNIQUE_LABELS` (`mix_tech`, `falsetto_tech`, `breathy_tech`, `pharyngeal_tech`, `vibrato_tech`, `glissando_tech`) are **fixed**. They will not be renamed or re-numbered.
+- The per-note `technique` dict shape is **fixed**: `{"status": "ok"|"missing_data", "per_label": {<label>: {"partition": "matched"|"missed"|"user_added"|"both_absent", "user_score": float, "ref_score": float}}}`.
+- `technique_section_density`'s shape is **fixed**: `{section_name: {label: float}}`.
+- Every other field in §7's frozen list is untouched by this work (F1's `ref_*` fields and F2's four dimensions are deterministic DSP, not model outputs — retraining cannot move them at all).
+
+**What is NOT stable — do not depend on these.** The *values* inside the technique fields will change, possibly substantially:
+
+- Technique **scores and partitions will shift** as the checkpoint is retrained. Do not hard-code magic numbers derived from observed technique scores, and do not calibrate F5's confidence weighting against the current distribution.
+- As of this writing the live checkpoint at `models/technique/ssl_f0.pth` is still the **randomly-initialized dummy** from `scripts/make_dummy_technique_checkpoint.py` (§4). Its technique scores are **meaningless noise**. The real trained checkpoint is at `models/technique/ssl_f0_trained.pth`, not yet swapped in. So any VOCALIZATION claim F4 generates today "passes" on noise, not signal — relevant to F4's "claims in ≥5 of the 7 categories" bar, since technique density is VOCALIZATION's only feeder.
+- `partition_technique`'s `threshold: float = 0.5` argument may become **per-label** (threshold tuning alone recovered +0.066 macro-F1 — see §12). The returned dict's keys do not change, so F4 is unaffected, but the function signature may.
+
+**The one real hazard, if Session B re-runs scoring.** `run_scoring` reads the song's cached reference technique blob and partitions fresh take vectors against it with **no model-version check** (`elums/scoring/tasks.py`, the `if song_analysis.technique_blob_sha256:` block). If the checkpoint changes between when a song's reference blob was computed and when a take is scored, the partition silently compares new take vectors against old reference vectors — plausible-looking, meaningless output. `model_versions["technique"]` is recorded on both sides but nothing compares them. **Mitigation: after any checkpoint swap, re-run `run_technique_reference` across all songs before trusting any partition.**
+
+**Recommendation for Session B: work from a frozen fixture, not from live scoring.** Session B's own entry contract already says so ("Session A's frozen payload field list, and nothing else. Do not re-derive measurements here or reach back into f0 blobs"). Honoring it literally means Session B needs **no GPU and no checkpoint**, and this retraining cannot disturb it at all: F4/F5 read an analysis payload, and F6 is a remote LLM call. Save one real scored analysis blob as a test fixture and build against that — which also satisfies §5's "no live LLM call, no microphone" test requirement for free.
+
+**Contention note:** retraining itself runs on `elums-vm`, so there is no local GPU contention. Only *validating* a new checkpoint locally touches the local GPU, and that serializes behind `lock="gpu:separation"` rather than corrupting anything.
+
+### 12. Post-handoff: threshold tuning and span-level scoring recovered +0.066 macro-F1, with no retraining
+
+Ran before starting any Tier 2 retraining, to separate "the model is bad" from "the metric and the operating point are wrong." New `scripts/technique_head_rescore.py`, results in `results/technique_head_rescore.json`. The harness reproduces the ablation's 0.4230 exactly at frame-level/0.5/full-val, which is how it is known to be trustworthy.
+
+| Variant | frame-level | span-level (what actually ships) |
+| --- | --- | --- |
+| threshold 0.5 (baseline) | 0.4477 | 0.4363 |
+| per-label tuned thresholds | **0.5176** | **0.5026** |
+
+Measured on 18 held-out songs the thresholds were never fitted on. Note the reporting half is slightly easier than the full val split (frame @0.5 is 0.4477 there vs 0.4234 across all of val), so the honest gain attributable to tuning is the **+0.066 to +0.070 within the same reporting half**, not a naive comparison against 0.4230.
+
+**The entire gain is in the rare labels**, confirming an imbalance-collapse diagnosis rather than a capacity problem: `pharyngeal_tech` 0.020 → 0.197 (~10×) and `vibrato_tech` 0.098 → 0.257 (~2.6×) at span level, while `mix_tech`/`falsetto_tech` barely moved. A fixed 0.5 cutoff was only ever wrong for the infrequent classes.
+
+**Span pooling did not help — it slightly hurt** (0.5026 vs frame's 0.5176), contrary to expectation. Pooling averages probabilities across a span before thresholding, which denoises but destroys sub-span temporal structure — exactly what `vibrato_tech` depends on (frame 0.383 → span 0.257). Span-level remains the number that matters, since `pool_to_spans` is what ships; the credit for the gain belongs to thresholding, not pooling.
+
+**Two findings that reframe the remaining gap to 0.70:**
+
+1. **The GTSinger English corpus has only 3 singers** — `EN-Alto-1` and `EN-Alto-2` in train, `EN-Tenor-1` alone in val. The "singer-disjoint" split is therefore also voice-type- and gender-disjoint with n=1 in validation, which is close to a worst-case generalization test. It also made singer-held-out threshold tuning impossible (hence the song-disjoint fallback, 18/18 of that singer's 36 songs). This explains `pharyngeal_tech` staying at ~0.20 even tuned: the model never saw a male voice in training, and pharyngeal resonance presents very differently across voice types. **This is a data problem, not a tuning problem** — which promotes "train on all GTSinger languages" from a nice-to-have to the primary lever, since it is the only way to get more singers.
+2. **`vibrato_tech`'s F1-optimal threshold is 0.98**, which is a red flag rather than a win: the model emits high vibrato probability nearly everywhere and only the extreme tail discriminates. Consistent with the F0 frontend feeding **raw Hz** into a Linear alongside roughly unit-scale SSL features (a ~1000× scale mismatch) when vibrato is inherently a *relative* cents modulation. Representing F0 as cents-relative-to-rolling-median plus deltas is the best remaining shot at vibrato.
+
+Tuned thresholds were **deliberately not wired into `partition_technique`** — they are calibrated on a single tenor, and `vibrato_tech`'s 0.98 in particular should not ship as-is.
+
+---
+
+## Friday Oct 9 — Day 7, Session B (claims and voice: F4 detector algebra, F5 evidence/selection, F6 LLM card rewriting)
+
+Per `IMPLEMENTATION_PLAN_2026-10-09.md`'s session split, this entry covers **Session B only** (F4, F5, F6). Built entirely from Session A's frozen payload field list (§7 above) — no GPU, no checkpoint, no f0 blob access, exactly per this session's own entry contract. The concurrent technique-retraining notice (§11 above) is honored by construction: nothing here reads a technique *value* as a magic number, only field names and the `>= threshold` gate §11.2(5) names.
+
+### 1. Milestone status
+
+| Milestone | Status | Notes |
+| --- | --- | --- |
+| F4 — composable detector algebra | **done** | `elums/coaching/algebra.py`; 21 detectors across all 7 categories, including both named co-occurrence composites |
+| F5 — evidence, confidence, diverse selection | **done** | `elums/coaching/selection.py`; all six named behaviors implemented and tested |
+| F6 — LLM card rewriting | **done, live-validated** | `elums/llm/client.py`; one real OpenRouter call confirmed `reasoning_tokens=0`, schema-conformant, both cards rewritten |
+
+### 2. F4 — the algebra, as actually built
+
+`elums/coaching/algebra.py` defines a `Claim` dataclass and a `REGISTRY` of `DetectorSpec`s populated by a `@register(name, category, basis, direction, scope)` decorator — the registry **is** the cross-session contract, queried by `registry_names()`. 21 detectors are registered, deliberately composed rather than a flat 1:1 port:
+
+- **Note-scope, absolute basis** (9): `pitch_flat`, `pitch_sharp`, `pitch_in_tune`, `pitch_drifting_flat`, `timing_late`, `timing_early`, `vibrato_present`, `onset_glottal`, `onset_balanced`, `breath_ran_out_early`, `formant_instability`, `dynamic_arc_shape` — one primitive per dimension × direction, each reading only Session A's frozen fields.
+- **Note-scope, reference-relative** (6): `louder_than_reference`, `quieter_than_reference`, `vibrato_missing_vs_reference`, `onset_type_mismatch`, `formant_stability_worse_than_reference`, `breath_decay_worse_than_reference` — gated purely on `ref_*` field presence, so a song with no reference pass degrades to zero comparative claims rather than erroring (tested directly).
+- **Co-occurrence composites, exactly the plan's own two examples** (2): `breath_support_issue` (pitch flattening AND volume fading, via `drift_cents_per_s` AND `dynamic_arc`) and `registration_strain` (high note AND sharp AND loud — "high" computed as the take's own note-range 75th percentile, never an absolute vocal-range assumption). Both are compositions of the primitive fields already defined above, not separate hand-rolled functions.
+- **Section/overall scope** (2 generator functions, not single detectors): `section_technique_drop` reads the top-level `technique_section_density` dict directly (§4.6's "kept vibrato in the chorus, dropped it in the verses," only computable there, never per-note); `breath_event` reads the top-level `breath_events` list.
+
+**§11.2(5)'s cross-check is wired**, not left for later: `vibrato_present` gates on the note's `technique.per_label.vibrato_tech.user_score >= vibrato_technique_gate_threshold` (0.1, from `config/coaching.yaml`) when a technique partition is present, and runs ungated (the DSP measurement alone) when it isn't — the documented degraded mode, not a new one.
+
+**New `config/coaching.yaml` + `elums/coaching/config.py`'s `CoachingConfig`**, per §3's settled decision ("thresholds are config-as-data... elums/config.py stays infrastructure-only"). Every detector threshold and every F5 selection cap lives there, not hardcoded in the detector bodies — `pitch_flat_cents_threshold`, `vibrato_band_min/max_hz`, `registration_strain_high_note_percentile`, `comparative_confidence_boost`, `max_cards_per_type/category`, etc.
+
+**One deliberate scope note on `registration_strain`**: it needs the chart's `target_midi` per note, which is chart data, not a Session A measurement — `generate_claims(payload, cfg, chart_notes=...)` takes the chart's own note list as an optional third argument purely to supply this one field. Every other detector reads only the frozen payload.
+
+### 3. F5 — evidence/confidence/selection, the six named behaviors
+
+`elums/coaching/selection.py`'s `compute_confidence` and `select_cards`:
+
+1. **Comparative confidence bounded by the weaker side's coverage** — `min(user_coverage, ref_coverage)` multiplies the evidence for every `basis="reference"` claim, using `voiced_coverage`/`ref_voiced_coverage` (Session A's frozen fields).
+2. **×1.3 comparative boost** — applied on top of that bound, from `cfg.comparative_confidence_boost`, clipped at 1.0.
+3. **Inverted certainty for absence claims** — `ABSENCE_CLAIM_TYPES = {"vibrato_missing_vs_reference"}` gets confidence = coverage directly (not evidence × coverage): being sure nothing is there scales with how clean the signal was, not with a "how present" score that doesn't apply.
+4. **One guaranteed affirming card** — if diversity-capped selection produced zero `direction="affirming"` cards but at least one exists in the candidate pool, the single highest-confidence affirming candidate is force-included (displacing the selection's own last pick if the total cap is already hit).
+5. **Per-type and per-category caps** — `max_cards_per_type=2`, `max_cards_per_category=3`, `max_cards_total=12` (config-as-data), enforced by a round-robin walk across categories so one loud category can't crowd out the other six.
+6. **Chronological display sort, low-confidence suppression** — `min_confidence_to_surface=0.35` filters before ranking; final list is sorted by `start_s`, not confidence (confidence only decided which cards survived).
+
+**Tested directly** (`tests/test_coaching_algebra.py`, 21 tests, all synthetic fixtures): comparative confidence is lower when reference coverage is poor; removing the reference side degrades to absolute-only claims without erroring; no two same-type selected cards overlap in time; a strong take and a weak take produce visibly different selected-type sets (`pitch_flat` appears only in the weak take's selection); a guaranteed affirming card is present when one exists; a near-zero-coverage note's claim is suppressed below the floor even with extreme evidence. A dedicated test (`test_claim_detail_reproduces_its_own_predicate`) spot-checks the plan's own acceptance bar directly: a claim's `detail` dict numbers are exactly what the predicate branched on.
+
+**A realistic multi-dimension take fixture hits 6 of 7 categories** (`TestFiveOfSevenCategories`, clears the plan's ≥5 bar with one category to spare) — PITCH, RHYTHM, DICTION, BREATH, TECHNIQUE, EXPRESSION all fire; VOCALIZATION needs a technique partition or DSP vibrato to also fire, which the fixture doesn't include but a separate test (`test_vibrato_passes_gate_with_sufficient_technique_score`) confirms fires correctly when it's present.
+
+### 4. F6 — one deliberate deviation from the plan's wording, documented not silent
+
+`elums/llm/client.py` is `qwen/qwen3.8-27b`, the exact non-thinking sampling set (`temperature=0.7, top_p=0.80, top_k=20, presence_penalty=1.5`), `reasoning:{enabled:false}`, `provider:{require_parameters:true}`, a strict `response_format` JSON Schema, a 2-repair-attempt loop feeding the validation error back (3 attempts total), structlog logging of `model`/`duration_ms`/token counts from the first call, and a fallback to deterministic text that is asserted to **never raise** (`request_fn` swap point for tests, no live call in the suite).
+
+**Deviation**: built on plain `httpx` + Pydantic v2 directly, not the `instructor` package the plan names. Reasoning: this project's own dependency discipline (every pin in `pyproject.toml` is individually justified in a comment, torch-free api/worker images, `audio-separator[cpu]` over the GPU extra specifically to avoid a second unused CUDA runtime) treats "add a library" as a decision to justify, and `instructor` pulls in `openai`+`aiohttp`+friends (29 packages in a dry-run) for what the repair loop needed in ~30 lines here, already matching `scripts/ec1_openrouter_check.py`'s own existing plain-`httpx` precedent. The resulting behavior — strict schema, repair loop, structlog, graceful fallback — is unchanged; only the implementation vehicle differs. Flagged here explicitly per this session's own instruction not to let a deviation go unrecorded.
+
+**Live-validated** (`scripts/f6_card_rewrite_check.py`, run for real against OpenRouter, same pattern as EC-1's own standalone script, not pytest): `reasoning_tokens=0`, both test cards came back rewritten (not the deterministic fallback), `duration_ms≈1800` for a 2-card batch. The unset-key path was also run for real (not just mocked): clears to the deterministic text with a `llm.card_rewrite.no_key` log line and no exception.
+
+**Mocked test suite** (`tests/test_llm_client.py`, 7 tests, no live call): unset key never calls the transport; a valid response overrides deterministic text; one malformed response followed by a valid repair recovers and the repair message carries the validation error back; three consecutive malformed responses exhaust all repair attempts and fall back cleanly; a missing required field (schema violation, not just invalid JSON) also triggers the repair path; a transport-level exception (`httpx.ConnectError`) breaks immediately without burning repair attempts on a problem repair can't fix; an empty card batch never calls the transport at all.
+
+**Cut from scope, exactly as the plan's §6 reduction 3 names**: no hypothesis-proposal call site (§6.4c), no section narratives, no performance summary. One call site only — card summary rewriting.
+
+### 5. The published exit contract — registry + card schema
+
+`elums/coaching/cards.py`'s `build_cards(payload, chart_notes, cfg, use_llm)` is the one function that composes F4 → F5 → F6 and is this session's actual deliverable per the plan's own framing ("the claim-type registry... and the selected-card JSON schema... consumed by Session C and by Saturday's challenge generation"):
+
+- **Registry**: `elums.coaching.algebra.registry_names()` — 21 stable names, listed in §2 above. **Do not rename any of these** (§6.6's own warning, repeated here deliberately).
+- **Card schema**: `CardPublic(card_id, type, category, scope, basis, direction, start_s, end_s, confidence, text, detail, note_index, section)` — Session C's frontend reads this as data and must not reimplement any predicate behind it.
+- Deterministic sentence templates (`_TEMPLATES`, one per registered type) are both the LLM-unavailable fallback text AND what the LLM is handed to rewrite — the model's job stays "rewrite," never "invent," by construction (it never sees bare numbers without a human-readable starting sentence).
+- `use_llm=False` skips F6 entirely; tested directly (`test_no_llm_mode_never_imports_or_calls_rewrite`) to confirm the deterministic-only path truly never touches the LLM client.
+
+### 6. Validation summary
+
+- `tests/test_coaching_algebra.py`: 21/21 passed (F4 primitives, co-occurrence composites, registry, F5 confidence/selection behaviors, the ≥5-category bar).
+- `tests/test_llm_client.py`: 7/7 passed (repair loop, fallback, transport-error handling — no live call).
+- `tests/test_coaching_cards.py`: 3/3 passed (registry round-trip, deterministic text grounding, `use_llm=False` isolation).
+- `scripts/f6_card_rewrite_check.py`: **PASS**, live — `reasoning_tokens=0`, both cards rewritten, confirmed against the real funded key (MA-2 already done, carried from Session A's EC-1 pass).
+- Full deterministic suite re-run after this session's changes (`tests/test_coaching_dimensions.py`, `test_coaching_algebra.py`, `test_llm_client.py`, `test_coaching_cards.py`, `test_lyrics.py`, `test_notes.py`, `test_scoring.py`, `test_wav.py`): **102/102 passed**, confirmed under a clean `uv sync --group dev` (not just the ambient dev environment) — this caught three genuinely missing explicit pins (`pyyaml`, `pydantic`, `structlog`, `pydantic-settings`) that a locally-installed-but-unpinned package would have hidden; all four now pinned in `pyproject.toml`'s `core`/`dev` groups with the same per-need comment discipline the rest of the file uses.
+- `make up`/live-stack tests (`test_songs.py`, `test_separation.py`) were deliberately **not** run this session — they hit the running compose stack over HTTP, which is Session C/the final acceptance pass's job, not Session B's (no GPU, no server, per this session's own entry contract).
+
+### 7. Blockers
+
+- **None.** Everything in scope landed and validated.
+
+### 8. Loose ends carried forward
+
+- **`vibrato_present`'s technique gate uses whatever checkpoint is live at scoring time** — per Session A's §11 concurrent-work notice, today's checkpoint is still the random-weight dummy, so any VOCALIZATION claim gated on it in a *real* scored performance is gated on noise until the real checkpoint is swapped in and `run_technique_reference` is re-run across all songs (Session A's own mitigation, not repeated here). The field-level contract this session built against is unaffected.
+- **No API route serves cards yet.** `build_cards` is a pure function over a payload dict; wiring a `GET /api/performances/{id}/cards` endpoint (or equivalent) that loads the analysis blob, the song's chart, and calls `build_cards` is Session C's job per its own entry contract ("the frontend reads cards as data").
+- **`registration_strain`'s percentile-based "high note" threshold** is computed per-performance from that take's own note range. On a song with a narrow range (few genuinely "high" notes by its own standard), this could under- or over-fire relative to what a vocal coach would call "high" in an absolute sense. Not chased further — matches F2's own "plausible, imperfect, not chased further" precedent from Session A.
+- **F6's streaming requirement ("stream the copy," §12.2) is not implemented.** `rewrite_cards` is a single blocking call per batch; Session C's card UI will need either a streaming variant of this client or to accept the ~1.8s-per-batch latency measured live today. Flagged as an explicit decision point below.
+- **Section-scope and overall-scope claims (`section_technique_drop`, `breath_event`) have `start_s=end_s=0.0` or the event's own span respectively** — `section_technique_drop` has no single timestamp by nature (it's a whole-section comparison), so Session C's click-to-seek will need a convention for where a section-scope card seeks to (e.g. the section's own start time from the chart) that this session didn't have the chart's section boundaries in scope to decide.
+
+### 9. Decisions Session C needs
+
+1. **Streaming**: ship F6's batches as blocking calls (simplest, ~1.8s/batch measured) or add a streaming variant now. The plan's own latency note (§12.2: "~9s per 600 tokens... stream the copy") suggests streaming matters more as batch count grows; today's 2-card smoke test was fast enough to not force the question.
+2. **Section-scope card seek target**: `section_technique_drop` cards carry `section` (a name, e.g. `"chorus"`) but no `start_s`/`end_s` — Session C needs the chart's section boundary list (already in the chart blob, `chart["sections"]`) to resolve a seek time; this session didn't reach into the chart for anything beyond `target_midi` (deliberately, per the entry contract) and left it as a `0.0` placeholder rather than guessing.
+3. **`GET` endpoint for cards**: decide whether cards are computed on-demand per request (simple, recomputes F4/F5 every view) or cached alongside the performance's analysis blob at scoring time (matches the "one versioned blob" precedent elsewhere in the project, avoids re-running the LLM call on every page view). Not decided here — genuinely Session C's call, since it's a serving-layer question, not a claims-layer one.
+4. **Confirm `vibrato_present`'s gate behavior once Session A's real checkpoint lands** — no code change needed (the gate already reads `technique.per_label.vibrato_tech.user_score` by field name, which is stable per Session A's §11), but the *rate* at which VOCALIZATION cards fire will shift from "gated on noise" to "gated on signal," worth a sanity re-check against a real take once that checkpoint is live.
