@@ -2,6 +2,7 @@ from elums.models.base import Base
 from elums.models.blob import Blob
 from elums.models.follow import Follow
 from elums.models.ingest_job import IngestJob, IngestJobStage, IngestJobStatus
+from elums.models.performance import Performance, PerformanceKind, PerformanceStatus
 from elums.models.session import Session
 from elums.models.song import Song, SongVisibility
 from elums.models.song_analysis import SongAnalysis
@@ -16,6 +17,9 @@ __all__ = [
     "IngestJob",
     "IngestJobStage",
     "IngestJobStatus",
+    "Performance",
+    "PerformanceKind",
+    "PerformanceStatus",
     "Session",
     "Song",
     "SongAnalysis",

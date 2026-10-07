@@ -23,10 +23,12 @@ from elums.config import settings
 from elums.ingest.probe import UndecodableAudioError, probe_audio, split_artist_title_from_filename
 from elums.jobs.app import app as procrastinate_app
 from elums.models.ingest_job import IngestJob
+from elums.models.performance import Performance, PerformanceKind
 from elums.models.song import Song, SongVisibility
 from elums.models.song_analysis import SongAnalysis
 from elums.models.stem import Stem, StemKind
 from elums.models.user import User
+from elums.schemas.performances import PerformancePublic
 from elums.schemas.songs import IngestJobPublic, SongBundlePublic, SongPublic
 
 router = APIRouter(prefix="/songs", tags=["songs"])
@@ -248,3 +250,26 @@ async def get_song_bundle(
         f0_blob_sha256=analysis.f0_blob_sha256 if analysis else None,
         note_count=analysis.note_count if analysis else 0,
     )
+
+
+@router.get("/{song_id}/seeds", response_model=list[PerformancePublic])
+async def list_seeds(
+    song_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[Performance]:
+    """Wed Oct 7 (W6): §7.3's async seed/join — "a session becomes a
+    solo take published as a joinable seed." Public by construction
+    (publishing a seed is an explicit opt-in act, unlike a song's own
+    visibility default), so this endpoint takes no auth at all, same
+    reasoning a public song's blobs are anonymously fetchable."""
+    try:
+        song_uuid = uuid.UUID(song_id)
+    except ValueError as exc:
+        raise ApiError("not_found", "No such song.", status_code=404) from exc
+
+    result = await db.execute(
+        select(Performance)
+        .where(Performance.song_id == song_uuid, Performance.kind == PerformanceKind.SEED)
+        .order_by(Performance.created_at.desc())
+    )
+    return list(result.scalars())

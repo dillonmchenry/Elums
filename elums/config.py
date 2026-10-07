@@ -45,5 +45,13 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 30 * 1024 * 1024  # 30 MB
     max_upload_duration_s: int = 600  # 10 minutes
 
+    # --- Performance chunked upload staging (W3, Wed Oct 7) ---
+    # A sibling of blob_root, never a literal path elsewhere — chunks
+    # land here mid-take and are assembled into one file for
+    # BlobStore.put on `complete`, then the staging directory for that
+    # performance is removed.
+    performance_staging_root: Path = Path("/data/performance-staging")
+    max_take_bytes: int = 60 * 1024 * 1024  # ~3 min of 48kHz stereo WAV, generous
+
 
 settings = Settings()

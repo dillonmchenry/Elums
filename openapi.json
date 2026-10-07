@@ -185,6 +185,275 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "PerformanceCreate": {
+        "properties": {
+          "device_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Label"
+          },
+          "latency_offset_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Offset Ms"
+          },
+          "parent_performance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Performance Id"
+          },
+          "song_id": {
+            "format": "uuid",
+            "title": "Song Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "song_id"
+        ],
+        "title": "PerformanceCreate",
+        "type": "object"
+      },
+      "PerformanceKind": {
+        "enum": [
+          "solo",
+          "seed",
+          "join"
+        ],
+        "title": "PerformanceKind",
+        "type": "string"
+      },
+      "PerformancePublic": {
+        "properties": {
+          "alignment_warning": {
+            "title": "Alignment Warning",
+            "type": "boolean"
+          },
+          "analysis_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Blob Sha256"
+          },
+          "arrival_offset_ms_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrival Offset Ms Median"
+          },
+          "audio_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Blob Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "device_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Label"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "f0_blob_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F0 Blob Sha256"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PerformanceKind"
+          },
+          "latency_offset_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Offset Ms"
+          },
+          "median_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cents"
+          },
+          "octave_shift_semitones": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Octave Shift Semitones"
+          },
+          "offset_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset S"
+          },
+          "parent_performance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Performance Id"
+          },
+          "pct_in_tune": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct In Tune"
+          },
+          "score_overall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Overall"
+          },
+          "song_id": {
+            "format": "uuid",
+            "title": "Song Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PerformanceStatus"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "song_id",
+          "user_id",
+          "kind",
+          "parent_performance_id",
+          "status",
+          "error_message",
+          "audio_blob_sha256",
+          "f0_blob_sha256",
+          "analysis_blob_sha256",
+          "score_overall",
+          "pct_in_tune",
+          "median_cents",
+          "arrival_offset_ms_median",
+          "octave_shift_semitones",
+          "alignment_warning",
+          "offset_s",
+          "latency_offset_ms",
+          "device_label",
+          "created_at"
+        ],
+        "title": "PerformancePublic",
+        "type": "object"
+      },
+      "PerformanceStatus": {
+        "enum": [
+          "uploading",
+          "scoring",
+          "succeeded",
+          "failed"
+        ],
+        "title": "PerformanceStatus",
+        "type": "string"
+      },
       "RegisterRequest": {
         "properties": {
           "display_name": {
@@ -587,6 +856,219 @@
         ]
       }
     },
+    "/api/performances": {
+      "post": {
+        "operationId": "create_performance_api_performances_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerformanceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformancePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Performance",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
+    "/api/performances/{performance_id}": {
+      "get": {
+        "description": "Owner-or-public, reusing `get_ingest_status`'s convention verbatim\n(elums/api/routers/songs.py) \u2014 a performance's visibility follows its\nSONG's visibility, since a performance has no visibility field of its\nown.",
+        "operationId": "get_performance_api_performances__performance_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "performance_id",
+            "required": true,
+            "schema": {
+              "title": "Performance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformancePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Performance",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
+    "/api/performances/{performance_id}/chunks/{index}": {
+      "put": {
+        "operationId": "put_chunk_api_performances__performance_id__chunks__index__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "performance_id",
+            "required": true,
+            "schema": {
+              "title": "Performance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Chunk",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
+    "/api/performances/{performance_id}/complete": {
+      "post": {
+        "operationId": "complete_performance_api_performances__performance_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "performance_id",
+            "required": true,
+            "schema": {
+              "title": "Performance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformancePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Performance",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
+    "/api/performances/{performance_id}/publish-seed": {
+      "post": {
+        "description": "\u00a77.3: \"a session becomes a solo take published as a joinable\nseed.\" Only the owner may publish, and only once scoring has\nsucceeded \u2014 publishing a half-scored take would let a joiner build\non top of a performance that might still fail.",
+        "operationId": "publish_seed_api_performances__performance_id__publish_seed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "performance_id",
+            "required": true,
+            "schema": {
+              "title": "Performance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformancePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Seed",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
     "/api/songs": {
       "post": {
         "operationId": "upload_song_api_songs_post",
@@ -709,6 +1191,53 @@
           }
         },
         "summary": "Get Ingest Status",
+        "tags": [
+          "songs"
+        ]
+      }
+    },
+    "/api/songs/{song_id}/seeds": {
+      "get": {
+        "description": "Wed Oct 7 (W6): \u00a77.3's async seed/join \u2014 \"a session becomes a\nsolo take published as a joinable seed.\" Public by construction\n(publishing a seed is an explicit opt-in act, unlike a song's own\nvisibility default), so this endpoint takes no auth at all, same\nreasoning a public song's blobs are anonymously fetchable.",
+        "operationId": "list_seeds_api_songs__song_id__seeds_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "song_id",
+            "required": true,
+            "schema": {
+              "title": "Song Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PerformancePublic"
+                  },
+                  "title": "Response List Seeds Api Songs  Song Id  Seeds Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Seeds",
         "tags": [
           "songs"
         ]

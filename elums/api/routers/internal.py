@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from elums.api.deps import get_db
 from elums.auth.sessions import get_session_by_token
 from elums.config import settings
+from elums.models.performance import Performance, PerformanceKind
 from elums.models.song import Song, SongVisibility
 from elums.models.song_analysis import SongAnalysis
 from elums.models.stem import Stem
@@ -91,10 +92,39 @@ async def blob_authz(request: Request, db: AsyncSession = Depends(get_db)) -> Re
             )
         }.values()
     )
-    if not songs:
+    # Wed Oct 7 (W3/W6): a performance's three blobs (take audio, take
+    # f0, analysis) are NOT reachable via a song join at all — their
+    # owner is the performer (Performance.user_id), not the song's
+    # uploader, and a published SEED is deliberately public regardless
+    # of the underlying song's own visibility (§7.3: a seed exists to be
+    # joined by someone else). Checked independently of, and OR'd with,
+    # the song-blob check above.
+    via_performance_audio = await db.execute(
+        select(Performance).where(Performance.audio_blob_sha256 == sha256)
+    )
+    via_performance_f0 = await db.execute(
+        select(Performance).where(Performance.f0_blob_sha256 == sha256)
+    )
+    via_performance_analysis = await db.execute(
+        select(Performance).where(Performance.analysis_blob_sha256 == sha256)
+    )
+    performances = list(
+        {
+            performance.id: performance
+            for performance in (
+                *via_performance_audio.scalars(),
+                *via_performance_f0.scalars(),
+                *via_performance_analysis.scalars(),
+            )
+        }.values()
+    )
+
+    if not songs and not performances:
         return Response(status_code=403)
 
     if any(song.visibility is SongVisibility.PUBLIC for song in songs):
+        return Response(status_code=204)
+    if any(performance.kind == PerformanceKind.SEED for performance in performances):
         return Response(status_code=204)
 
     raw_token = request.cookies.get(settings.session_cookie_name)
@@ -106,6 +136,8 @@ async def blob_authz(request: Request, db: AsyncSession = Depends(get_db)) -> Re
         return Response(status_code=403)
 
     if any(song.uploaded_by_user_id == session.user_id for song in songs):
+        return Response(status_code=204)
+    if any(performance.user_id == session.user_id for performance in performances):
         return Response(status_code=204)
 
     return Response(status_code=403)

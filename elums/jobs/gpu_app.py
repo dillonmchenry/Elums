@@ -19,3 +19,7 @@ from elums.separation import task  # noqa: F401  (import side effect: registers 
 # way — this module also imports torch (via elums.ingest.structure), so
 # it lives behind the same gpu-worker-only entrypoint.
 from elums.ingest import tasks as ingest_tasks  # noqa: F401,E402
+
+# Wed Oct 7 (W4): registers `run_scoring` — imports elums.ingest.f0, which
+# imports torch, so it lives behind this same gpu-worker-only entrypoint.
+from elums.scoring import tasks as scoring_tasks  # noqa: F401,E402
