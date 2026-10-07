@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -94,3 +94,16 @@ class SongAnalysis(TimestampMixin, Base):
     # T2's note-histogram cross-check (§5) — deliberately NOT overwriting
     # key_tonic/key_mode above; the owner judges which one wins (M1 gate).
     key_tonic_from_notes: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    key_mode_from_notes: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    key_confidence_from_notes: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Wed Oct 7 (W0 of IMPLEMENTATION_PLAN_2026-10-07.md): the resolved
+    # key `_quantize_to_key` actually used — the higher-margin side of
+    # key_tonic/key_mode (chroma) vs key_tonic_from_notes/key_mode_from_notes
+    # (note histogram). `key_confidence_low` flags when even the WINNING
+    # margin sits under elums.ingest.notes.KEY_CONFIDENCE_LOW_THRESHOLD —
+    # a real, surfaced "this song's key is genuinely ambiguous," not a
+    # silently confident pick. All four raw fields above stay untouched.
+    key_tonic_resolved: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    key_mode_resolved: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    key_confidence_low: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

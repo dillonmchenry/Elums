@@ -40,7 +40,7 @@ def test_build_note_grid_single_steady_pitch_syllable_yields_one_note() -> None:
     f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=1.0)  # C4, steady
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 1.0}]}]
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -65,7 +65,7 @@ def test_build_note_grid_never_crosses_a_syllable_boundary() -> None:
         }
     ]
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -80,7 +80,7 @@ def test_build_note_grid_pitch_jump_within_one_syllable_splits_into_two_notes() 
     f0_hz, confidence = _two_note_track(midi_a=60, midi_b=67, duration_each_s=0.5)
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 1.0}]}]
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -97,7 +97,7 @@ def test_build_note_grid_drops_segments_shorter_than_the_minimum() -> None:
     f0_hz[blip_frame] = 440.0 * 2 ** ((72 - 69) / 12.0)  # one wild frame
 
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 1.0}]}]
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -115,7 +115,7 @@ def test_build_note_grid_unvoiced_gap_produces_no_note() -> None:
     confidence = np.concatenate([conf, unvoiced_conf])
 
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 1.0}]}]
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -127,7 +127,7 @@ def test_build_note_grid_vocable_events_are_unconstrained_spans() -> None:
     f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=1.0)
     vocable_events = [{"start_s": 0.0, "end_s": 1.0}]
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, [], vocable_events, beats=[], key_tonic=None, key_mode=None
     )
 
@@ -158,7 +158,7 @@ def test_build_note_grid_note_count_is_plausible_not_thousands() -> None:
     f0_hz = np.concatenate(f0_parts)
     confidence = np.concatenate(conf_parts)
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -205,7 +205,7 @@ def test_build_note_grid_never_snaps_a_note_below_the_minimum_duration() -> None
     f0_hz = np.concatenate([pad, f0_hz])
     confidence = np.concatenate([pad, confidence])
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=beats, key_tonic=None, key_mode=None
     )
 
@@ -230,7 +230,7 @@ def test_build_note_grid_never_snaps_a_note_before_its_own_syllable_start() -> N
     f0_hz = np.concatenate([pad, f0_hz])
     confidence = np.concatenate([pad, confidence])
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=beats, key_tonic=None, key_mode=None
     )
 
@@ -248,7 +248,7 @@ def test_build_note_grid_clamps_frame_rounding_overshoot_at_the_span_end() -> No
     syllable_end_s = 0.9951  # deliberately not frame-aligned (100Hz grid)
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": syllable_end_s}]}]
 
-    notes, _, _, _ = build_note_grid(
+    notes, _, _, _, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
@@ -284,9 +284,68 @@ def test_build_note_grid_returns_a_key_tonic_from_notes() -> None:
     f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=2.0)
     words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 2.0}]}]
 
-    _, key_tonic_from_notes, _, key_confidence_from_notes = build_note_grid(
+    _, key_tonic_from_notes, _, key_confidence_from_notes, _, _, _ = build_note_grid(
         f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic=None, key_mode=None
     )
 
     assert key_tonic_from_notes in {"C", "A"}  # KS major/minor profiles both peak near a pure pitch class
     assert key_confidence_from_notes >= 0.0
+
+
+# --- W0 key reconciliation (Wed Oct 7, 2026) -------------------------------
+
+
+def test_build_note_grid_resolves_to_higher_margin_side_when_chroma_wins() -> None:
+    # All-C note histogram (confident, high margin) but we deliberately
+    # pass a HIGH-confidence chroma key disagreeing with it (G) — chroma
+    # should win since its margin is higher, and quantization should
+    # follow the resolved (G) key, not the note histogram's (C).
+    f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=2.0)  # pure C
+    words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 2.0}]}]
+
+    notes, key_tonic_from_notes, _, key_confidence_from_notes, key_tonic_resolved, _, _ = build_note_grid(
+        f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic="G", key_mode="major",
+        key_confidence=0.99,
+    )
+
+    assert key_tonic_resolved == "G"
+    # Raw values are untouched regardless of which side won.
+    assert key_tonic_from_notes in {"C", "A"}
+    assert key_confidence_from_notes >= 0.0
+    assert notes[0].midi_raw == pytest.approx(60.0, abs=0.5)
+
+
+def test_build_note_grid_resolves_to_notes_side_when_its_margin_is_higher() -> None:
+    f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=2.0)
+    words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 2.0}]}]
+
+    _, key_tonic_from_notes, _, _, key_tonic_resolved, _, _ = build_note_grid(
+        f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic="G", key_mode="major",
+        key_confidence=0.0,
+    )
+
+    assert key_tonic_resolved == key_tonic_from_notes
+
+
+def test_build_note_grid_flags_key_confidence_low_when_winning_margin_is_small() -> None:
+    f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=2.0)
+    words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 2.0}]}]
+
+    *_, key_confidence_low = build_note_grid(
+        f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic="G", key_mode="major",
+        key_confidence=0.023,  # below KEY_CONFIDENCE_LOW_THRESHOLD (0.06), e.g. real hot-n-cold margin
+    )
+
+    assert key_confidence_low is True
+
+
+def test_build_note_grid_key_confidence_low_false_when_winning_margin_is_clear() -> None:
+    f0_hz, confidence = _constant_pitch_track(midi=60, duration_s=2.0)
+    words = [{"syllables": [{"text": "LA", "start_s": 0.0, "end_s": 2.0}]}]
+
+    *_, key_confidence_low = build_note_grid(
+        f0_hz, confidence, FRAME_RATE_HZ, words, [], beats=[], key_tonic="C", key_mode="major",
+        key_confidence=0.5,
+    )
+
+    assert key_confidence_low is False

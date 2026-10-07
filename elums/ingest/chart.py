@@ -77,6 +77,9 @@ def assemble_chart(
     vocals_sha256: str,
     instrumental_sha256: str,
     peaks_sha256: str,
+    key_tonic_resolved: str | None = None,
+    key_mode_resolved: str | None = None,
+    key_confidence_low: bool = False,
 ) -> dict:
     """Assembles the one fetchable artifact `GET /api/songs/{id}` points
     at. Versioned from the first write (`CHART_VERSION`) so a later
@@ -92,6 +95,11 @@ def assemble_chart(
             "tonic_from_notes": key_tonic_from_notes,
             "mode_from_notes": key_mode_from_notes,
             "confidence_from_notes": key_confidence_from_notes,
+            # Wed Oct 7 (W0): the side `_quantize_to_key` actually used,
+            # plus whether even the winning margin was low-confidence.
+            "tonic_resolved": key_tonic_resolved,
+            "mode_resolved": key_mode_resolved,
+            "confidence_low": key_confidence_low,
         },
         "sections": sections,
         "beats": beats,

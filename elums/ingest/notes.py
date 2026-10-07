@@ -221,6 +221,43 @@ def _note_histogram_key_cross_check(
     return best_tonic, best_mode, best_corr - second_corr
 
 
+# Wed Oct 7 (W0 of IMPLEMENTATION_PLAN_2026-10-07.md): a margin (not a
+# correlation) below this on BOTH sides means neither estimator is
+# confident — surfaced via `key_confidence_low` rather than silently
+# picking a winner anyway. Per the plan's own range (0.05-0.08),
+# documented against `hot-n-cold`'s real 0.023/0.022 pair (Day 4 §10).
+KEY_CONFIDENCE_LOW_THRESHOLD = 0.06
+
+
+def _resolve_key(
+    key_tonic: str | None,
+    key_mode: str | None,
+    key_confidence: float | None,
+    key_tonic_from_notes: str,
+    key_mode_from_notes: str,
+    key_confidence_from_notes: float,
+) -> tuple[str, str, bool]:
+    """The higher-margin side wins the resolved key that `_quantize_to_key`
+    consumes. Both raw estimates and both margins are kept on the model
+    (`key_tonic`/`key_mode`/`key_confidence` from chroma,
+    `key_tonic_from_notes`/`key_mode_from_notes`/`key_confidence_from_notes`
+    from this module) for audit — this function only decides the winner,
+    it never overwrites either raw value. `key_confidence_low` is true
+    when the WINNING margin is still below the threshold: a low-confidence
+    resolution is a real, surfaced fact, not a silently confident one."""
+    chroma_confidence = key_confidence if key_confidence is not None else -1.0
+    if key_tonic is not None and chroma_confidence >= key_confidence_from_notes:
+        resolved_tonic, resolved_mode, winning_confidence = key_tonic, key_mode or "major", chroma_confidence
+    else:
+        resolved_tonic, resolved_mode, winning_confidence = (
+            key_tonic_from_notes,
+            key_mode_from_notes,
+            key_confidence_from_notes,
+        )
+    confidence_low = winning_confidence < KEY_CONFIDENCE_LOW_THRESHOLD
+    return resolved_tonic, resolved_mode, confidence_low
+
+
 def build_note_grid(
     f0_hz: np.ndarray,
     confidence: np.ndarray,
@@ -230,14 +267,21 @@ def build_note_grid(
     beats: list[float],
     key_tonic: str | None,
     key_mode: str | None,
-) -> tuple[list[Note], str, str, float]:
+    key_confidence: float | None = None,
+) -> tuple[list[Note], str, str, float, str, str, bool]:
     """`words`: the chart's `lyrics.words[]`, each with `syllables[]`
     (`{text, start_s, end_s}`). `vocable_events`: `{start_s, end_s}`
     dicts, treated as unconstrained spans (no syllable clipping).
 
     Returns `(notes, key_tonic_from_notes, key_mode_from_notes,
-    key_confidence_from_notes)` — the cross-check this module exists to
-    perform, per T2's own instruction not to overwrite `key_tonic`.
+    key_confidence_from_notes, key_tonic_resolved, key_mode_resolved,
+    key_confidence_low)`. `key_confidence` is the chroma estimator's own
+    margin (`SongAnalysis.key_confidence`) — needed here (Wed Oct 7, W0)
+    to decide which side's key the resolved value (and therefore
+    `_quantize_to_key`) uses. Neither raw `key_tonic`/`key_mode` nor
+    `key_tonic_from_notes`/`key_mode_from_notes` is ever overwritten by
+    this resolution — both are returned unchanged for audit, per T2's
+    original instruction.
     """
     # Each raw note carries its own span bounds (`span_start_s`) alongside
     # it — never crossing a syllable boundary (§5's own invariant) means
@@ -265,6 +309,9 @@ def build_note_grid(
     key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes = _note_histogram_key_cross_check(
         [n[2] for n in raw_notes], [n[1] - n[0] for n in raw_notes]
     )
+    key_tonic_resolved, key_mode_resolved, key_confidence_low = _resolve_key(
+        key_tonic, key_mode, key_confidence, key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes
+    )
 
     notes: list[Note] = []
     for start_s, end_s, midi_raw, note_conf, span_start_s, syllable_index, word_index, is_vocable in raw_notes:
@@ -282,7 +329,7 @@ def build_note_grid(
             or end_s - snapped_start < MIN_NOTE_DURATION_S
         ):
             snapped_start = start_s
-        quantized_midi = _quantize_to_key(midi_raw, key_tonic, key_mode)
+        quantized_midi = _quantize_to_key(midi_raw, key_tonic_resolved, key_mode_resolved)
         notes.append(
             Note(
                 start_s=snapped_start,
@@ -296,4 +343,12 @@ def build_note_grid(
             )
         )
 
-    return notes, key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes
+    return (
+        notes,
+        key_tonic_from_notes,
+        key_mode_from_notes,
+        key_confidence_from_notes,
+        key_tonic_resolved,
+        key_mode_resolved,
+        key_confidence_low,
+    )

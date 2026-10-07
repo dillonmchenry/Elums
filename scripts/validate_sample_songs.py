@@ -122,6 +122,9 @@ def structural_checks(chart: dict) -> dict:
         "key_tonic_from_notes": chart.get("key", {}).get("tonic_from_notes"),
         "key_mode_from_notes": chart.get("key", {}).get("mode_from_notes"),
         "key_confidence_from_notes": chart.get("key", {}).get("confidence_from_notes"),
+        "key_tonic_resolved": chart.get("key", {}).get("tonic_resolved"),
+        "key_mode_resolved": chart.get("key", {}).get("mode_resolved"),
+        "key_confidence_low": chart.get("key", {}).get("confidence_low"),
         "duration_s": duration_s,
     }
 

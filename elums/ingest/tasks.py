@@ -784,6 +784,7 @@ async def run_note_grid(song_id: str) -> None:
     beats = artifact.get("beats", [])
     key_tonic = artifact.get("key", {}).get("tonic")
     key_mode = artifact.get("key", {}).get("mode")
+    key_confidence = artifact.get("key", {}).get("confidence")
 
     import time
 
@@ -795,7 +796,15 @@ async def run_note_grid(song_id: str) -> None:
     # `run_rms_vad`), so there is no `vram_peak_mb` to measure here.
     t0 = time.monotonic()
     try:
-        notes, key_tonic_from_notes, key_mode_from_notes, key_confidence_from_notes = await asyncio.to_thread(
+        (
+            notes,
+            key_tonic_from_notes,
+            key_mode_from_notes,
+            key_confidence_from_notes,
+            key_tonic_resolved,
+            key_mode_resolved,
+            key_confidence_low,
+        ) = await asyncio.to_thread(
             build_note_grid,
             f0_hz,
             confidence,
@@ -805,6 +814,7 @@ async def run_note_grid(song_id: str) -> None:
             beats,
             key_tonic,
             key_mode,
+            key_confidence,
         )
         peaks = await asyncio.to_thread(compute_peaks, str(instrumental_path))
     except Exception as exc:  # noqa: BLE001
@@ -840,6 +850,9 @@ async def run_note_grid(song_id: str) -> None:
         key_tonic_from_notes=key_tonic_from_notes,
         key_mode_from_notes=key_mode_from_notes,
         key_confidence_from_notes=key_confidence_from_notes,
+        key_tonic_resolved=key_tonic_resolved,
+        key_mode_resolved=key_mode_resolved,
+        key_confidence_low=key_confidence_low,
         sections=artifact.get("sections", []),
         beats=beats,
         downbeats=artifact.get("downbeats", []),
@@ -865,6 +878,11 @@ async def run_note_grid(song_id: str) -> None:
             analysis.peaks_blob_sha256 = peaks_blob_ref.sha256
             analysis.note_count = len(notes)
             analysis.key_tonic_from_notes = key_tonic_from_notes
+            analysis.key_mode_from_notes = key_mode_from_notes
+            analysis.key_confidence_from_notes = key_confidence_from_notes
+            analysis.key_tonic_resolved = key_tonic_resolved
+            analysis.key_mode_resolved = key_mode_resolved
+            analysis.key_confidence_low = key_confidence_low
             analysis.model_versions = {**analysis.model_versions, "note_grid": "derivative-peak-segmentation-v1"}
 
         ingest_job = await _get_ingest_job(db, song_uuid)
