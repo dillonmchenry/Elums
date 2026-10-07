@@ -3,6 +3,8 @@ import "./apiClient";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
+import { PerformancePage } from "./pages/PerformancePage";
+import { SingPage } from "./pages/SingPage";
 import { SongPage } from "./pages/SongPage";
 
 function App() {
@@ -13,6 +15,11 @@ function App() {
       <Route path="/diagnostics" element={<DiagnosticsPage />} />
       {/* Tue Oct 6 (T4): the karaoke playback page — M1's "playable chart". */}
       <Route path="/songs/:id" element={<SongPage />} />
+      {/* Wed Oct 7 (W2/W6): capture a take, optionally joining a seed
+          via ?join=<performance_id>. */}
+      <Route path="/songs/:id/sing" element={<SingPage />} />
+      {/* Wed Oct 7 (W5/W6): one take's score + per-note coloring. */}
+      <Route path="/performances/:id" element={<PerformancePage />} />
     </Routes>
   );
 }

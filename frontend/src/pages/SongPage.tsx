@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import WaveSurfer from "wavesurfer.js";
 import { getSongBundleApiSongsSongIdGet } from "../client";
 import type { SongBundlePublic } from "../client";
+import { PitchLane } from "../components/PitchLane";
 
 // Tue Oct 6 (T4 of IMPLEMENTATION_PLAN_2026-10-06.md): the karaoke
 // playback page — press play, hear the instrumental, watch lyrics scroll
@@ -33,53 +34,10 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ready"; bundle: SongBundlePublic; chart: Chart; peaks: Peaks | null };
 
-const NOTE_LANE_HEIGHT = 120;
-const MIDI_RANGE = 24; // ±2 octaves around the note grid's own median, drawn once per song
-
 async function fetchBlobJson<T>(sha256: string): Promise<T> {
   const res = await fetch(`/blobs/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}`);
   if (!res.ok) throw new Error(`blob fetch failed: ${res.status}`);
   return (await res.json()) as T;
-}
-
-function NoteLane({ chart, width }: { chart: Chart; width: number }) {
-  // Static SVG lane, laid out once from the chart — not a 60fps canvas
-  // (that is Wednesday's work per the plan's own instruction). This is
-  // scaffolding to make a bad note grid visible at a glance during T6.
-  const notes = chart.notes;
-  if (notes.length === 0) {
-    return <p data-testid="note-lane-empty">No notes in this chart.</p>;
-  }
-  const midiValues = notes.map((n) => n.midi);
-  const centerMidi = midiValues.sort((a, b) => a - b)[Math.floor(midiValues.length / 2)];
-  const minMidi = centerMidi - MIDI_RANGE / 2;
-  const duration = chart.duration_s || 1;
-
-  const xFor = (t: number) => (t / duration) * width;
-  const yFor = (midi: number) =>
-    NOTE_LANE_HEIGHT - ((midi - minMidi) / MIDI_RANGE) * NOTE_LANE_HEIGHT;
-
-  return (
-    <svg
-      data-testid="note-lane"
-      width={width}
-      height={NOTE_LANE_HEIGHT}
-      viewBox={`0 0 ${width} ${NOTE_LANE_HEIGHT}`}
-      role="img"
-      aria-label="Note grid"
-    >
-      {notes.map((note, i) => (
-        <rect
-          key={i}
-          x={xFor(note.start_s)}
-          y={yFor(note.midi) - 2}
-          width={Math.max(1, xFor(note.end_s) - xFor(note.start_s))}
-          height={4}
-          fill={note.is_vocable ? "#999" : "#2d6cdf"}
-        />
-      ))}
-    </svg>
-  );
 }
 
 function LyricsView({ chart, currentTimeS }: { chart: Chart; currentTimeS: number }) {
@@ -216,8 +174,12 @@ export function SongPage() {
       <button type="button" onClick={() => waveSurferRef.current?.playPause()}>
         Play / pause
       </button>
+      <Link to={`/songs/${state.bundle.id}/sing`}>Sing this</Link>
 
-      <NoteLane chart={state.chart} width={laneWidth} />
+      {/* Wed Oct 7 (W5): Canvas pitch lane, replacing the static SVG
+          NoteLane — "replaced, not extended" per the plan's own
+          instruction. */}
+      <PitchLane notes={state.chart.notes} durationS={state.chart.duration_s} width={laneWidth} currentTimeS={currentTimeS} />
       <LyricsView chart={state.chart} currentTimeS={currentTimeS} />
     </main>
   );
