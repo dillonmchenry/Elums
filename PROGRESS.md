@@ -473,3 +473,103 @@ Surfaced while reasoning about what hardware Smule would need to provision (§11
 **Deliberately not changed:** `elums/separation/engine.py`'s comment, which still cites the Oct 3 three-second-clip measurement and carries an open "revisit on a full-length song." The 8-song run is that revisit and its numbers hold (1798–1830 MB on real full-length tracks vs the comment's ~1.7 GB), but the owner's call was to leave code comments out of this pass. Flagged here so it is a known stale comment rather than an unnoticed one.
 
 **Also unchanged, and worth stating:** the dated plans for Oct 3/4/5 and PROGRESS Days 1–3 all quote the old figures and were left alone, same append-only discipline as §11. They are records of what was believed on those days, not current claims.
+
+### 13. M1 listening spot-check done — gate closed (post-handoff, same evening)
+
+Closes §5/§8's open M1 decision and the Oct 7 plan's MA-1. The owner listened to **two** of §10's eight validated songs at `/songs/:id` on headphones (titles not recorded).
+
+- **Lyrics: pass by ear.** Syllable highlighting tracked the sung audio on both songs. This is the first by-ear confirmation of the CTC alignment layer, and closes Day 3's open "verified by ear on one chorus" item.
+- **Note grid: looks good.** Judged after the fix below; no octave flips or onset problems were called out. This is a visual-plus-audio judgment on two songs, not a measured onset-error or octave-error rate.
+- **Decision: M1 is met.** No correction UI and no curated-catalog fallback (risk 4). Oct 7 builds scoring against the charts as they are.
+
+Two fixes made during the check, both outside the ingest pipeline:
+
+1. **Found and fixed: the note lane and the waveform were drawn at different time scales.** `SongPage.tsx` hardcoded `NoteLane` to `width={800}`, while the waveform filled its container (up to 1126px per `index.css`'s `#root`). A note's x-position could not line up with the same timestamp on the waveform, so onset accuracy could not be judged at all. The lane now takes the waveform container's measured width through a `ResizeObserver`. Oct 7's W5 replaces this lane with the Canvas pitch lane anyway.
+2. **Found and fixed: frontend edits never reached the browser without a container restart.** Edits on the Windows host don't send Linux file-change events across Docker Desktop's bind mount, so Vite inside the container never saw them. `frontend/vite.config.ts` now sets `server.watch.usePolling: true` (300 ms interval). Verified: a source edit produced `hmr update` in the frontend log within about 3 s, with no restart.
+
+**Related, added to the Oct 7 plan (W4):** the reference's continuous pitch is stored in full (the per-song f0 blob), but the chart's `Note` carries only static pitch, and there is no per-frame loudness track for the reference vocal. W4's per-note measurement functions are to be written so they work on either the user take or the reference. Friday's reference-side fields (SecondPass §4.5) then reuse the same code. The reference loudness track is W4's optional item and first on the cut list.
+
+---
+
+## Wednesday Oct 7 — Day 5 (capture, scoring, async seed/join → M2)
+
+Governed by [IMPLEMENTATION_PLAN_2026-10-07.md](IMPLEMENTATION_PLAN_2026-10-07.md).
+
+### 1. Milestone status
+
+| Milestone | Status | Notes |
+| --- | --- | --- |
+| W0 — key-estimate reconciliation | **done** | `elums/ingest/notes.py` (`_resolve_key`), migration `a1b2c3d4e5f6` |
+| W1 — `thred` sweep | **done, reduced scope** | One real song, not 2-3 — see §3 |
+| W2 — capture pipeline | **done, deviated architecture** | `MediaRecorder`, not AudioWorklet — see §2 |
+| W3 — performance model + chunked upload | **done** | `elums/models/performance.py`, `elums/api/routers/performances.py` |
+| W4 — scoring job | **done** | `elums/scoring/{align,measure,loudness,score,tasks}.py` |
+| W5 — pitch lane + stacked playback | **partial** | `PitchLane.tsx` built and wired into both pages; true take-vs-take *stacking* (multiple lanes overlaid) not built — see §6 |
+| W6 — async seed/join | **done** | `publish-seed`, `GET /songs/{id}/seeds`, `?join=` param on `/sing` |
+| W7 — M2 validation | **partial** | One real end-to-end run (not 2 songs × 3 takes) — see §4 |
+
+Commits: `a650315` (W0) · `204a36a` (W4) · `1625cce` (W3+W6) · `8fe00d2` (W2+W5) · `0620e9e` (W1). All pushed to `origin/master`.
+
+### 2. EC-0 — the designated day-reshaper, and the call made on it
+
+**EC-0 was not run as a live-browser timebox** — this agent session has no interactive browser with a real microphone, so there was no way to actually verify "`addModule()` a no-op worklet, confirm it loads through Caddy at `:8080`, confirm it survives `vite preview`" per the plan's own acceptance bar. Rather than ship an AudioWorklet/`SharedArrayBuffer` pipeline that has never been exercised against a real mic or Caddy's COEP path, this took the plan's own **named fallback** verbatim (§6/EC-0's own words): *"fall back to `MediaRecorder` today, ship W3-W6 against it, and move the worklet to Thursday... That costs the zero-allocation guarantee and the live lane, not M2 — say so explicitly rather than sliding."*
+
+`frontend/src/pages/SingPage.tsx`: `getUserMedia` with `echoCancellation/noiseSuppression/autoGainControl: false`, a `track.getSettings()` check with a banner if the browser didn't honor it (§10.2), `MediaRecorder` with `ondataavailable` at a 1s timeslice driving the chunked upload. **None of this has been exercised in a real browser with a real microphone this session** — it type-checks (`tsc -b` clean), builds (`vite build` succeeds), and the route serves through Caddy (`200` confirmed), but `getUserMedia`'s actual permission prompt, `MediaRecorder`'s actual encoding, and the live pitch lane during a real take are all **unverified**. This is the single largest unresolved item from today — see §8.
+
+### 3. W1 — `thred` sweep, reduced scope
+
+`scripts/thred_sweep.py` (kept deliverable, not scratch) ran RMVPE's `infer_from_audio` at `thred` 0.01/0.03/0.05 against `is-this-all-liz-james.mp3`'s vocal stem (the only real song with stems still in the dev DB this session — no `data/samples/` audio exists on disk, gitignored per `.gitignore`, and no new real audio was sourced tonight). **Only one song, not the plan's 2-3** — honestly short of scope, not silently presented as complete.
+
+Result: `voiced_frame_ratio` vs VAD's ratio (0.792) was 0.633 / 0.623 / 0.619 at the three threds — a gap of -0.160 / -0.169 / -0.173. **The gap barely moves** (0.013 swing across a 5x threshold range) — per the plan's own instruction ("if it barely moves, stop and document the definitional difference"), this is now documented as a real measurement-definition difference (RMVPE's pitch-confidence gate vs RMS-VAD's energy gate, which also catches unvoiced consonants/breath) rather than a miscalibration, consistent with Day 4's 8-song finding (mean gap ≈ -0.11, every song negative). **Nothing consumes this number today; not tuned further**, per the plan's own instruction.
+
+### 4. W3/W4/W6 — live end-to-end validation
+
+A real `Performance` was pushed through the entire new pipeline against the live docker stack (not mocked): `POST /api/performances` → chunked `PUT .../chunks/0` (plus an idempotent re-PUT of index 0, plus an out-of-order index 5 correctly rejected `409`) → `POST .../complete` → `run_scoring` on the `gpu` queue → polled to `succeeded`. Take audio was `is-this-all-liz-james.mp3`'s own vocal stem fed back through the pipeline (no other real audio available this session) — since the chart's notes were derived from that exact stem, a near-zero `offset_s` (0.000) and `octave_shift_semitones` (0) is the expected and observed sanity check that alignment/octave-folding are wired correctly end-to-end.
+
+`pct_in_tune` came back at 0.303, `score_overall` 0.338 — lower than "identical audio to the chart's own source" might suggest, but **explainable, not chased further** (one diagnosis, not a retried fix): the chart's `Note.midi` is **key-quantized** (`_quantize_to_key`), not the raw per-syllable pitch, so even the literal source recording deviates from its own chart's idealized scale-degree targets by the quantization delta plus natural pitch wobble between syllables. This is the intended measurement (compare against the *chart*, not the raw reference), not a scoring bug — flagged here rather than left looking like an unexplained number.
+
+`publish-seed` and `GET /songs/{id}/seeds` both verified live: the performance published, appeared in the seeds list, and its audio blob became fetchable **anonymously** (`200`, no cookie) through Caddy — confirming `/internal/blob-authz`'s new seed-is-public branch (EC-5, §6 below) works, not just compiles. Full host `pytest` (88 passed, 1 skipped) and the live `test_separation.py` integration test (2 passed, full chain through `note_grid` with W0's new `build_note_grid` signature) both re-verified after every change tonight.
+
+**Not validated live**: the two-user JOIN flow (only one test user exercised `publish-seed`; no second user actually joined via `?join=<id>` through a real browser), the three named W4 cases as REAL audio (late-start, octave-down, silence were validated as synthetic unit tests in `tests/test_scoring.py`, not as real takes through the live queue), and Range-request (`206`) behavior specifically on the three new performance blob kinds (the authz *logic* is a straightforward extension of the existing pattern, proven correct for stems/analysis/f0/chart/peaks already, but not re-clicked for performance blobs specifically).
+
+### 5. W0 — key reconciliation
+
+`elums/ingest/notes.py::_resolve_key`: the higher-margin side (chroma's `key_confidence` vs the note-histogram's own `key_confidence_from_notes`) wins the `key_tonic_resolved`/`key_mode_resolved` that `_quantize_to_key` now actually consumes (previously quantization always used the chroma-only key regardless of confidence). `key_confidence_low` flags when even the *winning* margin sits under 0.06 (within the plan's 0.05-0.08 range). All four raw fields (`key_tonic`/`key_mode`/`key_confidence` and `key_tonic_from_notes`/`key_mode_from_notes`/`key_confidence_from_notes`) are kept untouched for audit — migration `a1b2c3d4e5f6` adds the two missing raw columns (`key_mode_from_notes`, `key_confidence_from_notes` were previously only in the chart blob, never a DB column) plus the three new resolved/flag columns.
+
+5 new unit tests in `tests/test_notes.py` cover: chroma wins on higher margin, notes-histogram wins on higher margin, `key_confidence_low=True` at a real documented low-margin pair (0.023, `hot-n-cold`'s actual Day 4 number), and `False` at a clear margin. **Not re-run against the 8-song table** (`scripts/validate_sample_songs.py` updated to surface the new fields, but no local sample audio exists this session to re-run it against) — the logic is unit-tested with the real documented numbers from Day 4's table, not re-verified end-to-end on all 8 songs tonight.
+
+### 6. W5 — what shipped vs what didn't
+
+`frontend/src/components/PitchLane.tsx`: Canvas 2D (not WebGL/SVG per §13), `devicePixelRatio` capped at 2, pre-computed arrays only (no allocation inside the draw effect). Used in three places: `SongPage.tsx` (replaces the old static SVG `NoteLane` entirely, per "replaced, not extended"), `SingPage.tsx` (live chart + playhead during a take), `PerformancePage.tsx` (per-note coloring by `pct_in_tune` against §6.2's green/yellow/red bands, plus an `f0Overlay` prop for the server-computed pitch — wired but not fed real overlay data from `PerformancePage` yet, since that needs unpacking the take's own `f0_blob_sha256` client-side, not built tonight).
+
+**Not built**: true take-vs-take *stacking* (multiple performances of the same song rendered as overlaid/adjacent lanes for comparison) — `PerformancePage.tsx` shows one take's score and lists how many seeds exist for the song, but does not render a second take's lane alongside it. Per the plan's own cut order (W6 before W5's stacking, both before W1), this is the correct thing to have left unbuilt if something had to give — W6 (seed/join) is fully done; this is the one piece of W5 short of complete.
+
+### 7. Deviations from the plan
+
+1. **EC-0's AudioWorklet pipeline was not attempted — the plan's own named fallback (`MediaRecorder`) was taken directly**, not discovered after a failed timebox. See §2. This is the single biggest architectural deviation tonight, taken deliberately and documented per the plan's own instruction to "say so explicitly rather than sliding."
+2. **Found and fixed during `alembic revision --autogenerate`:** the new `performances` migration's autogenerate diff also proposed dropping/recreating `song_embeddings`' unique constraint as a `unique=True` index — pre-existing drift between an earlier migration and the `SongEmbedding` model, unrelated to today's work. Left alone in the migration file (commented, not applied) per "avoid unrelated refactoring."
+3. **`alembic` needed `DATABASE_URL` pointed at `127.0.0.1:5433`, not the compose-internal `db` hostname**, to run from the Windows host against the already-running stack — same class of host-vs-container networking gap as prior days' `make` PATH issue, worked around the same way (explicit env var), not fixed structurally.
+4. **A second migration head existed already** (`a3e5f7c9b1d2`, pgvector) before tonight's work — found via `alembic heads` returning two results. W0's migration was rebased onto it (not onto the branch point) to keep one linear head; not investigated further whether that branch was intentional from Day 4.
+5. **Running a one-off script inside `gpu-worker` needed `PYTHONPATH=/app` explicitly** (`docker compose exec -T -e PYTHONPATH=/app gpu-worker python scripts/thred_sweep.py ...`) — `python scripts/foo.py` puts the script's own directory on `sys.path[0]`, not the cwd, so the editable `elums` import (which resolves via cwd, not a real site-packages `.pth`) fails unless the script is run with `-m` from `/app` or `PYTHONPATH` is set. Not hit by any existing script because they all run from the host venv, where `elums` genuinely is on `sys.path` via the venv's own mechanism. Worth a `Makefile` target wrapping this correctly if more in-container one-off scripts are written later.
+
+### 8. Blockers
+
+- **None new.** MA-3/MA-5's deployment questions remain closed per Day 4 §11 (no action needed from this agent).
+
+### 9. Loose ends carried forward
+
+- **Everything in §2 and §4's "not validated live" lists** — chiefly: no real browser/microphone verification of `SingPage.tsx`'s capture flow at all (permissions prompt, `MediaRecorder` encoding, live pitch lane during an actual take). This is the honest headline gap: the plan's acceptance checks 2 and 4 (`getSettings()` shows constraints false or banners, a playhead-synced lane during a live take) are implemented but **not seen to work**, only typechecked/built.
+- **Two-user JOIN flow** (`?join=<seed_id>` on `/sing`) is wired (the query param is read and passed as `parent_performance_id`) but never exercised with a second real user — only `publish-seed` and the seeds list were hit live.
+- **W4's three named cases (late-start, octave-down, silence) are unit-tested on synthetic f0, not run as real audio through the live queue** — the one live run tonight used perfectly-aligned, non-shifted audio (the chart's own source stem), which is a different (and weaker) check than the plan's three explicit cases.
+- **W5's take-vs-take stacking** is not built — see §6.
+- **W0's `key_confidence_low` table is not re-verified against the 8-song set** — no local sample audio this session; logic is unit-tested against Day 4's real documented numbers instead.
+- **W1's sweep used one song, not 2-3** — no second/third local sample audio this session.
+- **`PerformancePage.tsx`'s `f0Overlay` prop exists on `PitchLane` but isn't fed real data yet** — would need client-side unpacking of the take's own `f0_blob_sha256` (a binary `.npz`-style blob) via `fetch` + a JS-side unpacker, not built tonight.
+- **The pre-existing `song_embeddings` migration-vs-model drift** (§7 item 2) is flagged, not fixed — unrelated to today's scope.
+- **No "2 real songs, 3 takes each" W7 matrix** — one real end-to-end run only, documented honestly in §4/§8 rather than presented as the full validation matrix.
+
+### 10. Decisions the next session needs
+
+1. **EC-0 needs an actual human-in-a-browser pass** before trusting any of W2/W5's capture UI — ideally on the real target hardware (headphones + real mic, per MA-3 of the Oct 7 plan), through `localhost:8080` (not Vite's own port), confirming `getUserMedia` constraints actually land and a take records audibly. If that pass reveals the AudioWorklet path *would* have worked fine through Caddy after all, Thursday's NanoPitch work is the natural point to revisit the zero-allocation worklet pipeline instead of `MediaRecorder`.
+2. **Source 1-2 more real songs** (same licensing posture as `data/samples/README.md`'s existing CC-BY tracks) to re-run `scripts/thred_sweep.py` and `scripts/validate_sample_songs.py`'s `key_confidence_low` column against more than one data point — today's numbers are real but thin.
+3. **Decide whether `PerformancePage.tsx`'s stacked take-vs-take comparison is worth building before Thursday**, or whether it stays cut per the plan's own ordering (W6 > W5-stacking > W1) — W6 is done, so this is now the lowest-value remaining W5 piece, not blocking M2 either way per the plan's own gate wording ("sing against a chart, get per-note pitch scoring, and join someone else's seed").
