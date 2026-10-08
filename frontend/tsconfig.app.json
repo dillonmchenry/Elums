@@ -4,7 +4,13 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    // "node" added Fri Oct 9 (F7): npz.test.ts reads a real binary
+    // fixture via `node:fs`/`node:path`/`node:url` to prove the
+    // client-side .npz reader parses real `pack_f0_blob()` output,
+    // not a hand-rolled approximation of it -- vitest's own test
+    // runner is Node, so this is a type-only addition, not a new
+    // runtime dependency for the shipped app bundle.
+    "types": ["vite/client", "node"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

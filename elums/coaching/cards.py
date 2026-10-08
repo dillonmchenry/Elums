@@ -142,3 +142,41 @@ def build_cards(
         )
         for i in range(len(selected))
     ]
+
+
+def apply_section_seek_times(cards: list[CardPublic], sections: list[dict]) -> list[CardPublic]:
+    """Session C/F7 (IMPLEMENTATION_PLAN_2026-10-09.md): Session B's own
+    loose end (PROGRESS.md Day 7 Session B §8 last bullet) — a
+    section-scope claim (`section_technique_drop`) carries
+    `start_s=end_s=0.0` by construction, since a whole-section
+    comparison has no single timestamp. Owner decision (§9.2): seek to
+    that section's own start time from the chart's `sections[]`,
+    matched by label, as a stopgap until a dedicated "section stories"
+    surface exists. Pure and separately testable from the HTTP layer —
+    the router (`GET /performances/{id}/cards`) only has to load
+    `sections` and call this."""
+    section_start_by_label = {s.get("label") or s.get("name"): float(s["start_s"]) for s in sections}
+    out = []
+    for card in cards:
+        if card.scope == "section" and card.section is not None and card.section in section_start_by_label:
+            start = section_start_by_label[card.section]
+            out.append(
+                CardPublic(
+                    card_id=card.card_id,
+                    type=card.type,
+                    category=card.category,
+                    scope=card.scope,
+                    basis=card.basis,
+                    direction=card.direction,
+                    start_s=start,
+                    end_s=start,
+                    confidence=card.confidence,
+                    text=card.text,
+                    detail=card.detail,
+                    note_index=card.note_index,
+                    section=card.section,
+                )
+            )
+        else:
+            out.append(card)
+    return out

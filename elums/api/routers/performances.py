@@ -8,6 +8,7 @@ seed/join: "no new alignment code" — a JOIN is a plain performance with
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -22,13 +23,16 @@ from elums.api.errors import ApiError
 from elums.auth.sessions import get_session_by_token
 from elums.blobs.service import record_blob
 from elums.blobs.store import BlobStore
+from elums.coaching.cards import apply_section_seek_times, build_cards
 from elums.config import settings
 from elums.ingest.probe import UndecodableAudioError, probe_audio
 from elums.ingest.wav import build_wav_header
 from elums.jobs.app import app as procrastinate_app
 from elums.models.performance import Performance, PerformanceKind, PerformanceStatus
 from elums.models.song import Song, SongVisibility
+from elums.models.song_analysis import SongAnalysis
 from elums.models.user import User
+from elums.schemas.cards import CardSchema
 from elums.schemas.performances import PerformanceComplete, PerformanceCreate, PerformancePublic
 
 router = APIRouter(prefix="/performances", tags=["performances"])
@@ -234,6 +238,86 @@ async def get_performance(
             raise ApiError("not_found", "No such performance.", status_code=404)
 
     return performance
+
+
+@router.get("/{performance_id}/cards", response_model=list[CardSchema])
+async def get_performance_cards(
+    performance_id: str,
+    request: Request,
+    use_llm: bool = True,
+    db: AsyncSession = Depends(get_db),
+    store: BlobStore = Depends(get_blob_store),
+) -> list[CardSchema]:
+    """F7 (Session C, IMPLEMENTATION_PLAN_2026-10-09.md): compose
+    Session B's `build_cards` fresh on every request — recompute, don't
+    cache (§9.3 of PROGRESS.md's Day 7 Session B owner decisions: the
+    project's large API-credit budget makes recompute-per-request
+    simpler than a cache-invalidation story, and it means a
+    `coaching.yaml`/registry change takes effect immediately on every
+    existing performance's card view with no backfill job).
+
+    Reuses `get_performance`'s owner-or-public visibility rule verbatim.
+    Returns `[]` (not an error) for a performance that hasn't scored yet
+    or has no technique/measurement data to build claims from — the
+    frontend reads an empty card list as "nothing to show yet," same
+    convention as `seedCount`/`noteScores` elsewhere on this page.
+    """
+    try:
+        performance_uuid = uuid.UUID(performance_id)
+    except ValueError as exc:
+        raise ApiError("not_found", "No such performance.", status_code=404) from exc
+
+    performance = await db.get(Performance, performance_uuid)
+    if performance is None:
+        raise ApiError("not_found", "No such performance.", status_code=404)
+
+    song = await db.get(Song, performance.song_id)
+    if song is None or song.visibility is not SongVisibility.PUBLIC:
+        raw_token = request.cookies.get(settings.session_cookie_name)
+        session = await get_session_by_token(db, raw_token) if raw_token else None
+        if session is None or session.user_id != performance.user_id:
+            raise ApiError("not_found", "No such performance.", status_code=404)
+
+    if performance.status is not PerformanceStatus.SUCCEEDED or performance.analysis_blob_sha256 is None:
+        return []
+
+    with store.open(performance.analysis_blob_sha256) as f:
+        payload = json.loads(f.read())
+
+    analysis_result = await db.execute(
+        select(SongAnalysis).where(SongAnalysis.song_id == performance.song_id)
+    )
+    song_analysis = analysis_result.scalar_one_or_none()
+
+    chart_notes: list[dict] = []
+    sections: list[dict] = []
+    if song_analysis is not None and song_analysis.chart_blob_sha256:
+        with store.open(song_analysis.chart_blob_sha256) as f:
+            chart = json.loads(f.read())
+        chart_notes = [n for n in chart.get("notes", []) if not n.get("is_vocable")]
+        sections = chart.get("sections", [])
+
+    cards = build_cards(payload, chart_notes=chart_notes or None, use_llm=use_llm)
+    cards = apply_section_seek_times(cards, sections)
+
+    return [
+        CardSchema(
+            card_id=card.card_id,
+            type=card.type,
+            category=card.category,
+            scope=card.scope,
+            basis=card.basis,
+            direction=card.direction,
+            start_s=card.start_s,
+            end_s=card.end_s,
+            confidence=card.confidence,
+            text=card.text,
+            detail=card.detail,
+            note_index=card.note_index,
+            section=card.section,
+        )
+        for card in cards
+    ]
 
 
 @router.post("/{performance_id}/publish-seed", response_model=PerformancePublic)

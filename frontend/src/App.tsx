@@ -4,6 +4,7 @@ import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { PerformancePage } from "./pages/PerformancePage";
+import { ProgressPage } from "./pages/ProgressPage";
 import { SingPage } from "./pages/SingPage";
 import { SongPage } from "./pages/SongPage";
 
@@ -20,6 +21,9 @@ function App() {
       <Route path="/songs/:id/sing" element={<SingPage />} />
       {/* Wed Oct 7 (W5/W6): one take's score + per-note coloring. */}
       <Route path="/performances/:id" element={<PerformancePage />} />
+      {/* F8 (Session C, IMPLEMENTATION_PLAN_2026-10-09.md): gated
+          progress tracking for one user's own takes of one song. */}
+      <Route path="/songs/:id/progress" element={<ProgressPage />} />
     </Routes>
   );
 }

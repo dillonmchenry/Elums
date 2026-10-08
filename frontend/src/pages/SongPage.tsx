@@ -175,6 +175,8 @@ export function SongPage() {
         Play / pause
       </button>
       <Link to={`/songs/${state.bundle.id}/sing`}>Sing this</Link>
+      {" | "}
+      <Link to={`/songs/${state.bundle.id}/progress`}>My progress</Link>
 
       {/* Wed Oct 7 (W5): Canvas pitch lane, replacing the static SVG
           NoteLane — "replaced, not extended" per the plan's own

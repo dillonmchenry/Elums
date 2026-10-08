@@ -30,6 +30,153 @@
         "title": "Body_upload_song_api_songs_post",
         "type": "object"
       },
+      "CardSchema": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "direction": {
+            "title": "Direction",
+            "type": "string"
+          },
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "note_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Index"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card_id",
+          "type",
+          "category",
+          "scope",
+          "basis",
+          "direction",
+          "start_s",
+          "end_s",
+          "confidence",
+          "text",
+          "detail",
+          "note_index",
+          "section"
+        ],
+        "title": "CardSchema",
+        "type": "object"
+      },
+      "DimensionTrendSchema": {
+        "properties": {
+          "band_widen_factor": {
+            "title": "Band Widen Factor",
+            "type": "number"
+          },
+          "iqr_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iqr High"
+          },
+          "iqr_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iqr Low"
+          },
+          "performances_needed": {
+            "title": "Performances Needed",
+            "type": "integer"
+          },
+          "rolling_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Median"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "performances_needed",
+          "rolling_median",
+          "iqr_low",
+          "iqr_high",
+          "band_widen_factor"
+        ],
+        "title": "DimensionTrendSchema",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -595,6 +742,60 @@
         "title": "SongBundlePublic",
         "type": "object"
       },
+      "SongProgressSchema": {
+        "properties": {
+          "device_label_consistent": {
+            "title": "Device Label Consistent",
+            "type": "boolean"
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DimensionTrendSchema"
+            },
+            "title": "Dimensions",
+            "type": "object"
+          },
+          "normalization": {
+            "title": "Normalization",
+            "type": "string"
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DimensionTrendSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "performance_count": {
+            "title": "Performance Count",
+            "type": "integer"
+          },
+          "personal_best_score_overall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personal Best Score Overall"
+          }
+        },
+        "required": [
+          "performance_count",
+          "normalization",
+          "overall",
+          "dimensions",
+          "personal_best_score_overall",
+          "device_label_consistent"
+        ],
+        "title": "SongProgressSchema",
+        "type": "object"
+      },
       "SongPublic": {
         "properties": {
           "artist": {
@@ -952,6 +1153,63 @@
         ]
       }
     },
+    "/api/performances/{performance_id}/cards": {
+      "get": {
+        "description": "F7 (Session C, IMPLEMENTATION_PLAN_2026-10-09.md): compose\nSession B's `build_cards` fresh on every request \u2014 recompute, don't\ncache (\u00a79.3 of PROGRESS.md's Day 7 Session B owner decisions: the\nproject's large API-credit budget makes recompute-per-request\nsimpler than a cache-invalidation story, and it means a\n`coaching.yaml`/registry change takes effect immediately on every\nexisting performance's card view with no backfill job).\n\nReuses `get_performance`'s owner-or-public visibility rule verbatim.\nReturns `[]` (not an error) for a performance that hasn't scored yet\nor has no technique/measurement data to build claims from \u2014 the\nfrontend reads an empty card list as \"nothing to show yet,\" same\nconvention as `seedCount`/`noteScores` elsewhere on this page.",
+        "operationId": "get_performance_cards_api_performances__performance_id__cards_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "performance_id",
+            "required": true,
+            "schema": {
+              "title": "Performance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "use_llm",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Use Llm",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CardSchema"
+                  },
+                  "title": "Response Get Performance Cards Api Performances  Performance Id  Cards Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Performance Cards",
+        "tags": [
+          "performances"
+        ]
+      }
+    },
     "/api/performances/{performance_id}/chunks/{index}": {
       "put": {
         "operationId": "put_chunk_api_performances__performance_id__chunks__index__put",
@@ -1215,6 +1473,49 @@
           }
         },
         "summary": "Get Ingest Status",
+        "tags": [
+          "songs"
+        ]
+      }
+    },
+    "/api/songs/{song_id}/progress": {
+      "get": {
+        "description": "F8 (Session C, IMPLEMENTATION_PLAN_2026-10-09.md): one caller's\nown progress on one song. Always the caller's own data \u2014 unlike\n`get_song_bundle`'s owner-or-public rule, there is no \"public\"\nreading of someone else's progress, so this hard-requires a\nsession (`get_current_user`) rather than degrading to 404 for an\nanonymous caller.\n\nComputed fresh on every request (see `elums.progress.service`'s\nmodule docstring) \u2014 no persisted rating column, no cache.",
+        "operationId": "get_song_progress_api_songs__song_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "song_id",
+            "required": true,
+            "schema": {
+              "title": "Song Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongProgressSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Song Progress",
         "tags": [
           "songs"
         ]

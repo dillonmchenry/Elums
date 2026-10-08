@@ -28,7 +28,9 @@ from elums.models.song import Song, SongVisibility
 from elums.models.song_analysis import SongAnalysis
 from elums.models.stem import Stem, StemKind
 from elums.models.user import User
+from elums.progress.service import compute_song_progress
 from elums.schemas.performances import PerformancePublic
+from elums.schemas.progress import DimensionTrendSchema, SongProgressSchema
 from elums.schemas.songs import IngestJobPublic, SongBundlePublic, SongPublic
 
 router = APIRouter(prefix="/songs", tags=["songs"])
@@ -273,3 +275,54 @@ async def list_seeds(
         .order_by(Performance.created_at.desc())
     )
     return list(result.scalars())
+
+
+def _to_trend_schema(trend) -> DimensionTrendSchema | None:
+    if trend is None:
+        return None
+    iqr_low, iqr_high = trend.iqr_band if trend.iqr_band is not None else (None, None)
+    return DimensionTrendSchema(
+        verdict=trend.verdict,
+        performances_needed=trend.performances_needed,
+        rolling_median=trend.rolling_median,
+        iqr_low=iqr_low,
+        iqr_high=iqr_high,
+        band_widen_factor=trend.band_widen_factor,
+    )
+
+
+@router.get("/{song_id}/progress", response_model=SongProgressSchema)
+async def get_song_progress(
+    song_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SongProgressSchema:
+    """F8 (Session C, IMPLEMENTATION_PLAN_2026-10-09.md): one caller's
+    own progress on one song. Always the caller's own data — unlike
+    `get_song_bundle`'s owner-or-public rule, there is no "public"
+    reading of someone else's progress, so this hard-requires a
+    session (`get_current_user`) rather than degrading to 404 for an
+    anonymous caller.
+
+    Computed fresh on every request (see `elums.progress.service`'s
+    module docstring) — no persisted rating column, no cache.
+    """
+    try:
+        song_uuid = uuid.UUID(song_id)
+    except ValueError as exc:
+        raise ApiError("not_found", "No such song.", status_code=404) from exc
+
+    song = await db.get(Song, song_uuid)
+    if song is None:
+        raise ApiError("not_found", "No such song.", status_code=404)
+
+    summary = await compute_song_progress(db, current_user.id, song_uuid)
+
+    return SongProgressSchema(
+        performance_count=summary.performance_count,
+        normalization=summary.normalization,
+        overall=_to_trend_schema(summary.overall),
+        dimensions={k: _to_trend_schema(v) for k, v in summary.dimensions.items()},
+        personal_best_score_overall=summary.personal_best_score_overall,
+        device_label_consistent=summary.device_label_consistent,
+    )

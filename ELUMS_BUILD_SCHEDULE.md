@@ -239,6 +239,8 @@ Real iPhone in hand from hour one. **Work this list top-down and cut from the bo
 
 ## Sat Oct 10 — 8hr — Live duet + challenges → **M5**
 
+> **Added Oct 7, evening — this day's two tracks are decoupled from the technique-head retraining and can run alongside it.** Neither duet (reuses `run_scoring` unchanged) nor challenges (validates only against `elums.coaching.algebra.registry_names()`'s 21 frozen names) reads a technique checkpoint directly. The one real hazard: `run_scoring` has no model-version check between a song's cached reference technique blob and whatever checkpoint is live at scoring time, so swapping checkpoints mid-session while duet work is actively scoring real takes can silently produce stale-vs-fresh technique partitions. Re-run `run_technique_reference` across all songs after any swap before trusting technique-partition output again. Full detail: `PROGRESS.md`, Day 7 Session C §10.
+
 **Duet (6hr)**
 
 - [ ] FastAPI WebSocket rooms, one `asyncio` task per room so message handling is sequential and races vanish

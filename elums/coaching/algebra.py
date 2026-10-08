@@ -482,7 +482,17 @@ def _formant_stability_worse(note: dict, cfg: CoachingConfig) -> Claim | None:
     deltas = note.get("formant_std_delta_hz_by_formant")
     if not deltas:
         return None
-    worst = max(deltas)
+    # `compare_formant_consistency` fills a `None` entry per formant
+    # where either side lacks that formant (formants.py's own
+    # docstring) -- `deltas` itself being truthy only means at least
+    # one formant had both sides, not that every entry is a float.
+    # Found live (Session C, F7): a real scored take's third-formant
+    # entry was `None`, and bare `max(deltas)` tried to compare it
+    # against a float.
+    real_deltas = [d for d in deltas if d is not None]
+    if not real_deltas:
+        return None
+    worst = max(real_deltas)
     if worst < cfg.formant_delta_worse_hz_threshold:
         return None
     start_s, end_s = _note_window(note)
